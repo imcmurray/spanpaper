@@ -14,7 +14,7 @@
 # the sha256 against the live GitHub tarball.
 
 pkgname=spanpaper
-pkgver=0.2.0
+pkgver=0.3.0
 pkgrel=1
 pkgdesc="Wayland wallpaper daemon + tray applet — single image or video spanned across stacked monitors"
 arch=('x86_64')
