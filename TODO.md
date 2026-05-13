@@ -1,86 +1,74 @@
 # spanpaper — outstanding work
 
-## ⏳ Swap the test calibration content for real spanning content
+## ✅ Shipped in v0.3.0
 
-`--span` and `--side` both accept images *or* videos — pick whatever you have.
-
-Daemon is currently running the test-asset calibration video/image. When
-you've picked a real spanning MP4 (ideally 1920×2160 to match the
-HDMI-A-4 + DP-6 stack):
-
-```bash
-# hot-swap the span content (image or video), keep DP-5 untouched
-spanpaper set --span /path/to/your-real-content.mp4
-spanpaper set --span /path/to/your-real-content.png   # still image also works
-
-# (or swap both at once)
-spanpaper set \
-  --span /path/to/your-real-content.mp4 \
-  --side /path/to/your-real-side.jpg
-```
-
-`spanpaper set` writes the new config and sends SIGHUP to the running
-daemon, which rolls the workers in place — no restart needed.
-
-### Picking / encoding a source video
-
-The combined span area is **1920 × 2160** (two stacked 1920×1080 panels).
-Ideal source is a single MP4 at that resolution. Anything else gets cropped
-or letterboxed per the `span_fit` setting in
-`~/.config/spanpaper/config.toml` (`crop` = zoom-fill, default; `fit` =
-letterbox; `stretch` = ignore aspect).
-
-Re-encode to a hardware-decode-friendly H.264 8-bit yuv420p:
-
-```bash
-ffmpeg -i source.mp4 \
-  -c:v libx264 -preset slow -crf 20 \
-  -pix_fmt yuv420p -movflags +faststart -an \
-  -vf "scale=1920:2160:flags=lanczos" \
-  ~/Wallpapers/span-1920x2160.mp4
-```
-
-## ✅ Done
-
-- Native Wayland output enumeration (HDMI-A-4, DP-5, DP-6 detected with
-  correct stacked geometry).
-- Two mpvpaper instances locked to the same source MP4 with per-monitor
-  vertical crop filters — verified frame-level sync via on-screen
-  timestamps.
-- swaybg renders the DP-5 static image independently.
-- Daemon supervises workers (crash-restart with backoff, SIGHUP hot reload,
-  SIGTERM graceful shutdown).
-- `setup.sh`, `gen-test-assets.sh`, systemd user unit, autostart desktop
-  file.
-- v0.2.0 auto-detection: --span / --side accept either image or video.
-- vf chain pipelines scale-to-canvas then per-monitor crop, with
-  hwdec=auto-copy-safe so libavfilter sees CPU frames and keepaspect=no so
-  mpv doesn't pillarbox against the source aspect.
-- Persistence wired: config writes atomically on every `spanpaper set`;
-  ~/.config/autostart/spanpaper.desktop relaunches the daemon at login
-  (required on Budgie; graphical-session.target is inert there). systemd
-  --user unit also enabled for sessions that DO activate that target.
+- **Native Wayland output enumeration** (wl_output + xdg-output;
+  `spanpaper outputs` parses correctly across hot-plug).
+- **Span vf chain**: scale-to-canvas + per-monitor crop, with
+  `hwdec=auto-copy-safe` so libavfilter sees CPU frames and
+  `keepaspect=no` so mpv doesn't second-guess the chain.
+- **Daemon supervision**: crash-restart with linear backoff, SIGHUP
+  hot reload, SIGTERM graceful shutdown.
 - **Active span sync via mpv IPC**: span workers spawn paused with
-  `--input-ipc-server=…` and the daemon broadcasts a synchronous unpause
-  once every socket is up. Eliminates the visible drift that appeared
-  after a `spanpaper set --side <video>` SIGHUP-reload, where adding a
-  third mpvpaper to the spawn batch widened per-worker startup variance.
-  Verified at 0 ms drift across cold start, reload, side-swap SIGHUP,
-  and loop-wrap boundaries.
+  `--input-ipc-server=…`; the daemon broadcasts a synchronous
+  unpause once every socket is up. 0 ms drift verified across cold
+  start, SIGHUP-reload (incl. side-swap with a third mpv in the
+  spawn batch), and loop-wrap boundaries. Side video also gets a
+  socket so the tray can pause it alongside.
+- **`spanpaper set` hardening**: rejects paths containing newlines /
+  NUL bytes before writing config; warns (doesn't fail) when the
+  file doesn't yet exist so configure-before-place still works.
+- **`side_fit` independent of `span_fit`** — same three values
+  (crop / fit / stretch), applied separately to side image (swaybg
+  mode) and side video (mpv panscan/keepaspect). `side_mode`
+  removed.
+- **Right-click "Open With → Set as spanpaper span / side"** —
+  MimeType-only `.desktop` entries shipped in
+  `/usr/share/applications/`, `setup.sh` snapshots and re-pins
+  existing MIME defaults so installing the entries never displaces
+  the user's image viewer.
+- **Tray applet** (`spanpaper-tray`, GTK4 + ksni + gtk-layer-shell):
+  - Panel icon with state-driven glyph (playing / paused / stopped)
+  - Left-click anchors a popover near the icon via wlr-layer-shell
+  - To-scale monitor rectangles with cached ffmpeg thumbnails
+    (generated off the GTK thread; spinners while loading)
+  - Drag-and-drop file assignment from any file manager
+  - Portal-backed `gtk4::FileDialog` behind each rectangle's
+    "Change…" button
+  - Right-click menu: Pause/Resume, Span fit, Side fit, Audio,
+    Open config folder (via `FileManager1` D-Bus, not `xdg-open`),
+    Reload config, Start/Stop daemon, Quit
+  - In-place refresh after drop (no close-and-reopen)
+  - Focus-out auto-close (with suppression while the file picker
+    is open)
+  - Single-instance — clicking the tray icon while the palette is
+    open just raises it
+- **Packaging**: 0.3.0 ships both binaries + both autostart samples
+  + the "Open With" entries in one pacman package
+  (`spanpaper-bin-0.3.0-1-x86_64.pkg.tar.zst`). `setup.sh --with-tray`
+  is the equivalent for source installs.
 
 ## 💡 Possible follow-ups (not required)
 
-- **Periodic resync seek**: span workers now sync at every cold start /
-  SIGHUP-reload via mpv IPC (see "Span sync" in README). Measured drift is
-  0 ms across reloads and loop wraparounds, so periodic resync isn't
-  needed for normal use — but multi-hour sessions could still benefit
-  from a heartbeat: every N seconds, read worker 0's `time-pos` and
-  broadcast `seek $t absolute exact` to the others. Cheap to add (~30
-  LoC in `daemon.rs`'s supervisor loop) if drift is ever observed in
-  the wild.
-- **Auto-detect span groups**: instead of hard-coding `span_outputs`,
-  `spanpaper` could scan `wl_output` positions for any two outputs that are
-  vertically contiguous (`y2 == y1 + h1`) and span them automatically.
+- **Periodic resync seek**: span IPC sync at every reload covers
+  every case observed so far, but a multi-hour session could
+  drift sub-frame. A heartbeat (`time-pos` read from worker 0 →
+  `seek absolute exact` broadcast to others, every N seconds)
+  bounds drift to a single frame even under extreme conditions.
+  ~30 LoC in `daemon.rs`'s supervisor loop.
+- **Auto-detect span groups**: scan `wl_output` positions for any
+  two outputs that are vertically contiguous (`y2 == y1 + h1`) and
+  span them automatically, instead of requiring `span_outputs` in
+  config. Useful for portable / multi-rig users.
 - **Native libmpv render API**: swap the mpvpaper subprocess for an
-  in-process EGL + libmpv render context. Drops one process per output
-  and ~5 MB of overhead, but a big code investment for marginal gain.
+  in-process EGL + libmpv render context. Drops one process per
+  output and ~5 MB of overhead per worker, but a big code
+  investment for marginal gain.
+- **Split pacman package**: `spanpaper` (daemon-only, no GTK deps)
+  + `spanpaper-tray` (depends on `spanpaper`, adds GTK4 /
+  gtk4-layer-shell). Today's single-package install pulls ~100 MB
+  of GTK runtime even for users who only want the daemon. Skip
+  unless that becomes a real complaint.
+- **GNOME-Shell tray support**: documenting the AppIndicator
+  extension users need is fine for now; investigating a native
+  GNOME extension is out of scope.

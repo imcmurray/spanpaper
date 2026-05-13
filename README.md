@@ -301,18 +301,32 @@ spanpaper-tray &
 ## CLI cheatsheet
 
 ```bash
+# Daemon
 spanpaper outputs              # list detected Wayland outputs (one per line)
 spanpaper status               # daemon state + active config + outputs
-
 spanpaper start                # foreground (ctrl-c to stop)
 spanpaper start --background   # detached
 spanpaper stop
 spanpaper restart
 
-spanpaper set --span ~/foo.mp4    # rewrite config + SIGHUP running daemon
-spanpaper set --span ~/foo.png    # auto-detected as image, holds as still
-spanpaper set --side ~/bar.mp4    # video on DP-5; mpvpaper instead of swaybg
-spanpaper set --span ~/foo.mp4 --no-reload    # rewrite only
+# Assign wallpaper content
+spanpaper set --span ~/foo.mp4              # rewrite config + SIGHUP daemon
+spanpaper set --span ~/foo.png              # auto-detected as image, held as still
+spanpaper set --side ~/bar.mp4              # video on DP-5 (mpvpaper, not swaybg)
+spanpaper set --span ~/foo.mp4 --no-reload  # rewrite config only
+
+# Fit modes — independent for span and side, same three values
+spanpaper set --span-fit crop|fit|stretch
+spanpaper set --side-fit crop|fit|stretch
+
+# Audio (only meaningful for video span)
+spanpaper set --audio          # unmute
+spanpaper set --no-audio       # mute (default)
+
+# Tray applet (only present in packages built with --features tray
+# or installed via the prebuilt pacman package)
+spanpaper-tray                 # foreground (panel icon + layout palette)
+spanpaper-tray &               # background — usual launch pattern
 ```
 
 ## Picking / encoding source content
