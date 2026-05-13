@@ -211,10 +211,20 @@ if [[ "$AUTOSTART_MODE" == "ask" ]]; then
     esac
 fi
 
+# Both autostart files use @SPANPAPER_BIN@ as a placeholder for the real
+# binary path; the session's PATH does NOT include ~/.local/bin, so the
+# absolute form is required.
+substitute_autostart() {
+    local src="$1" dst="$2"
+    install -Dm644 /dev/null "$dst"
+    sed "s|@SPANPAPER_BIN@|$BIN_DST|g" "$src" > "$dst"
+    chmod 644 "$dst"
+}
+
 case "$AUTOSTART_MODE" in
     systemd)
         step "Installing systemd --user unit"
-        install -Dm644 "$REPO_DIR/contrib/spanpaper.service" "$SYSTEMD_DST"
+        substitute_autostart "$REPO_DIR/contrib/spanpaper.service" "$SYSTEMD_DST"
         systemctl --user daemon-reload
         systemctl --user enable spanpaper.service >/dev/null
         ok "enabled $SYSTEMD_DST"
@@ -222,7 +232,7 @@ case "$AUTOSTART_MODE" in
         ;;
     xdg)
         step "Installing XDG autostart entry"
-        install -Dm644 "$REPO_DIR/contrib/spanpaper.desktop" "$AUTOSTART_DST"
+        substitute_autostart "$REPO_DIR/contrib/spanpaper.desktop" "$AUTOSTART_DST"
         ok "installed $AUTOSTART_DST"
         ;;
     none)

@@ -2,15 +2,17 @@
 Description=spanpaper — spanning video wallpaper for Wayland
 PartOf=graphical-session.target
 After=graphical-session.target
+# Don't try to start before the Wayland session is up. (Goes in [Unit],
+# not [Service] — systemd silently ignores Condition* in the wrong section.)
+ConditionEnvironment=WAYLAND_DISPLAY
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/spanpaper start
+# Absolute path: user-systemd's PATH does NOT include ~/.local/bin on most
+# distros. setup.sh substitutes @SPANPAPER_BIN@ with the real install path.
+ExecStart=@SPANPAPER_BIN@ start
 Restart=on-failure
 RestartSec=2
-
-# Don't try to start before the Wayland session is up.
-ConditionEnvironment=WAYLAND_DISPLAY
 
 [Install]
 WantedBy=graphical-session.target

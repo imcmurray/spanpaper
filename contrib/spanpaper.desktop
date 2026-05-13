@@ -2,7 +2,10 @@
 Type=Application
 Name=spanpaper
 Comment=Spanning video wallpaper for Wayland
-Exec=spanpaper start --background
+# IMPORTANT: setup.sh substitutes @SPANPAPER_BIN@ with the real path. The
+# session autostart runs with PATH=/usr/local/bin:/usr/bin:/bin (no
+# ~/.local/bin), so the Exec= field MUST be an absolute path.
+Exec=@SPANPAPER_BIN@ start --background
 Terminal=false
 Categories=Utility;
 X-GNOME-Autostart-enabled=true
