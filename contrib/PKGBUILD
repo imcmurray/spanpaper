@@ -28,7 +28,7 @@ depends=('mpvpaper' 'swaybg' 'gtk4' 'gtk4-layer-shell')
 makedepends=('cargo')
 options=('!lto')   # Cargo.toml already sets `lto = "thin"`; let it own that knob.
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('7af8c1d8bd1944181650679e4ce234d4d6f3207bfc84f9643f35dff53337dcd6')
+sha256sums=('b44be56fe6684efc8e2dde10ac848565fd2a5c25d75ed9b7d5a409ddcb2028da')
 
 prepare() {
     cd "$pkgname-$pkgver"

@@ -201,6 +201,11 @@ step "building .pkg.tar.zst via makepkg"
 MAKEPKG_DIR="$STAGE/makepkg"
 mkdir -p "$MAKEPKG_DIR"
 cp contrib/PKGBUILD-bin "$MAKEPKG_DIR/PKGBUILD"
+# Pre-seed the local tarball so makepkg uses it instead of trying to
+# fetch the GitHub release asset — which doesn't exist until step 8
+# uploads it (chicken-and-egg). makepkg recognises a file already
+# present in its source dir by name and skips the download.
+cp "$BIN_TARBALL" "$MAKEPKG_DIR/"
 (
     cd "$MAKEPKG_DIR"
     makepkg --noconfirm --clean
