@@ -52,27 +52,16 @@ const PALETTE_WIDGET_NAME: &str = "spanpaper-palette";
 
 pub fn show(app: &gtk4::Application) {
     // Single-instance: if a palette window is already open, raise and
-    // focus it instead of spawning a second one. Drop handlers close
-    // the window after a successful assignment, so this path only
-    // matters when the user clicks the tray icon while their existing
-    // palette is still visible.
+    // focus it instead of spawning a second one. Drop handlers
+    // repopulate-in-place rather than closing, so this path catches
+    // any case where the tray icon is clicked while the palette is
+    // already visible.
     for w in app.windows() {
         if w.widget_name() == PALETTE_WIDGET_NAME {
             w.present();
             return;
         }
     }
-
-    let outputs = match crate::outputs_query::list() {
-        Ok(v) => v,
-        Err(e) => {
-            // Render an error window instead of silently failing — the
-            // user clicked the icon expecting something to happen.
-            present_error(app, &format!("Could not enumerate outputs:\n{e:#}"));
-            return;
-        }
-    };
-    let cfg = PartialConfig::load();
 
     let window = gtk4::ApplicationWindow::builder()
         .application(app)
@@ -81,6 +70,27 @@ pub fn show(app: &gtk4::Application) {
         .default_width(480)
         .build();
     window.set_widget_name(PALETTE_WIDGET_NAME);
+    populate(&window);
+    window.present();
+}
+
+/// (Re)build the palette window's child from current config + outputs.
+/// Called once from `show()` and again from each drop handler after a
+/// successful `spanpaper set`, so the new thumbnail appears in place
+/// without the user re-clicking the tray. Reads `spanpaper outputs`
+/// and `~/.config/spanpaper/config.toml` fresh on every call.
+fn populate(window: &gtk4::ApplicationWindow) {
+    window.set_child(Some(&build_content()));
+}
+
+fn build_content() -> gtk4::Widget {
+    let outputs = match crate::outputs_query::list() {
+        Ok(v) => v,
+        Err(e) => {
+            return error_widget(&format!("Could not enumerate outputs:\n{e:#}"));
+        }
+    };
+    let cfg = PartialConfig::load();
 
     let root = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Vertical)
@@ -91,9 +101,7 @@ pub fn show(app: &gtk4::Application) {
         .margin_end(12)
         .build();
 
-    let layout_row = build_layout_row(&outputs, &cfg);
-    root.append(&layout_row);
-
+    root.append(&build_layout_row(&outputs, &cfg));
     root.append(&summary_row("span", cfg.span.as_deref()));
     root.append(&summary_row("side", cfg.side.as_deref()));
 
@@ -103,9 +111,19 @@ pub fn show(app: &gtk4::Application) {
         .build();
     hint.set_xalign(0.0);
     root.append(&hint);
+    root.upcast()
+}
 
-    window.set_child(Some(&root));
-    window.present();
+fn error_widget(msg: &str) -> gtk4::Widget {
+    gtk4::Label::builder()
+        .label(msg)
+        .margin_top(20)
+        .margin_bottom(20)
+        .margin_start(20)
+        .margin_end(20)
+        .selectable(true)
+        .build()
+        .upcast()
 }
 
 /// Build the horizontal row of monitor rectangles. Span group on the
@@ -233,12 +251,16 @@ fn build_output_frame(
             tracing::warn!("set {role}: {e:#}");
             return false;
         }
-        // Close the popover. The user reopens (left-click the tray)
-        // to see refreshed thumbnails. In-place refresh is a future
-        // polish item.
+        // Refresh the popover in place: rebuild the window's child
+        // from the now-updated config. Window stays put, the new
+        // thumbnail materialises where the dropped-on frame used to
+        // be. Note: this closure holds a clone of the source frame,
+        // so the old widget tree (which includes that frame) stays
+        // alive until this callback returns — set_child on the
+        // window doesn't immediately destroy it.
         if let Some(root) = frame_for_close.root() {
-            if let Ok(win) = root.downcast::<gtk4::Window>() {
-                win.close();
+            if let Ok(win) = root.downcast::<gtk4::ApplicationWindow>() {
+                populate(&win);
             }
         }
         true
@@ -338,23 +360,5 @@ fn basename(p: &Path) -> String {
     p.file_name()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| p.display().to_string())
-}
-
-fn present_error(app: &gtk4::Application, msg: &str) {
-    let window = gtk4::ApplicationWindow::builder()
-        .application(app)
-        .title("spanpaper")
-        .resizable(false)
-        .build();
-    let label = gtk4::Label::builder()
-        .label(msg)
-        .margin_top(20)
-        .margin_bottom(20)
-        .margin_start(20)
-        .margin_end(20)
-        .selectable(true)
-        .build();
-    window.set_child(Some(&label));
-    window.present();
 }
 

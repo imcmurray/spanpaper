@@ -430,7 +430,8 @@ them is "do everything else first."
    **~1 day.**
 7. **M7 — Polish.** Icon states (playing/paused/error), focus-out
    auto-close, accessibility labels, autostart `.desktop`,
-   documentation pass. **~½ day.**
+   documentation pass. **~½ day.** *In-place palette refresh after
+   drop pulled forward — landed independently, see commit below.*
 
 Total: ~5 working days for a complete, polished result. M1 alone (~2
 hours) delivers most of the day-to-day workflow improvement; everything
