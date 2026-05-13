@@ -47,7 +47,7 @@ which         = "6"
 # Tray-only deps.
 ksni          = { version = "0.3", optional = true }
 tokio         = { version = "1",   optional = true, features = ["rt", "macros", "time", "signal"] }
-gtk4          = { version = "0.9", optional = true }
+gtk4          = { version = "0.9", optional = true, features = ["v4_8"] }
 async-channel = { version = "2",   optional = true }
 
 [profile.release]

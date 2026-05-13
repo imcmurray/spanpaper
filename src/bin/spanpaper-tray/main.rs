@@ -19,6 +19,7 @@
 mod daemon_client;
 mod outputs_query;
 mod palette;
+mod thumbnail;
 
 use anyhow::Result;
 use gtk4::prelude::*;

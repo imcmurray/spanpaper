@@ -8,7 +8,7 @@
 //! M3 is static — no drag-and-drop, no file picker, no thumbnails.
 //! Those land in M4/M5/M6 per docs/tray-applet-plan.md.
 
-use crate::outputs_query::OutputInfo;
+use crate::{outputs_query::OutputInfo, thumbnail};
 use gtk4::prelude::*;
 use serde::Deserialize;
 use std::path::Path;
@@ -180,19 +180,45 @@ fn build_output_frame(
     let inner = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Vertical)
         .spacing(2)
-        .halign(gtk4::Align::Center)
-        .valign(gtk4::Align::Center)
+        .halign(gtk4::Align::Fill)
+        .valign(gtk4::Align::Fill)
+        .hexpand(true)
+        .vexpand(true)
         .margin_top(4)
         .margin_bottom(4)
         .margin_start(4)
         .margin_end(4)
         .build();
 
-    let res = gtk4::Label::builder()
-        .label(&format!("{}×{}", out.width, out.height))
-        .css_classes(vec!["dim-label"])
-        .build();
-    inner.append(&res);
+    // Try the thumbnail first; on any failure fall back to a
+    // resolution-text placeholder so the popover always renders.
+    let picture_packed = match assigned {
+        Some(p) => match thumbnail::ensure(Path::new(p)) {
+            Ok(thumb) => {
+                let pic = gtk4::Picture::for_filename(&thumb);
+                pic.set_can_shrink(true);
+                pic.set_content_fit(gtk4::ContentFit::Cover);
+                pic.set_hexpand(true);
+                pic.set_vexpand(true);
+                inner.append(&pic);
+                true
+            }
+            Err(e) => {
+                tracing::warn!("thumbnail for {p}: {e:#}");
+                false
+            }
+        },
+        None => false,
+    };
+    if !picture_packed {
+        let res = gtk4::Label::builder()
+            .label(&format!("{}×{}", out.width, out.height))
+            .css_classes(vec!["dim-label"])
+            .vexpand(true)
+            .valign(gtk4::Align::Center)
+            .build();
+        inner.append(&res);
+    }
 
     let file_label = match assigned {
         Some(p) => basename(Path::new(p)),
@@ -202,6 +228,7 @@ fn build_output_frame(
         .label(&file_label)
         .ellipsize(gtk4::pango::EllipsizeMode::Middle)
         .max_width_chars(18)
+        .halign(gtk4::Align::Center)
         .build();
     inner.append(&file);
 

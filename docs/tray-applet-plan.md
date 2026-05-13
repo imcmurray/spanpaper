@@ -377,7 +377,30 @@ them is "do everything else first."
      the known three-monitor layout (HDMI-A-4 / DP-5 / DP-6).
 4. **M4 — Real thumbnails.** Reads current config, renders cached image
    thumbnails per slot. ffmpeg video-frame extraction with graceful
-   fallback. **~½ day.**
+   fallback. **~½ day.** ✅ Done.
+   * New `src/bin/spanpaper-tray/thumbnail.rs`. One code path handles
+     both stills and videos: `ffmpeg -ss 0.5 -i FILE -frames:v 1 -vf
+     scale=256:-1:flags=lanczos -c:v png -f image2 OUT`. The 0.5 s
+     pre-roll seek skips fade-in black frames on clips; for stills
+     it's a no-op.
+   * Cache layout: `$XDG_CACHE_HOME/spanpaper/thumbs/<hash>.png`,
+     where `<hash>` is a stable `DefaultHasher` of the canonicalised
+     absolute path. Atomic write via temp-then-rename. Mtime-based
+     invalidation when the source is newer than the cache.
+   * `palette::build_output_frame` swaps the resolution label for a
+     `gtk4::Picture::for_filename` with `ContentFit::Cover` so the
+     thumbnail fills the frame while preserving aspect; portrait
+     frames (the side output) crop the sides of a landscape source.
+     Falls back to the M3 resolution-text rendering when ffmpeg is
+     absent or fails — the popover must never blank because of
+     thumbnail trouble.
+   * `gtk4` feature set bumped to `["v4_8"]` for `Picture::content_fit`
+     (available since GTK 4.8; system GTK is 4.22+).
+   * Known cost: thumbnail generation runs synchronously inside the
+     GTK activate handler, so first-open of the palette blocks for
+     ~1 s per uncached source. Subsequent opens are instant. M7
+     polish can move generation onto a `glib::spawn_future_local`
+     task and render a spinner placeholder in the meantime.
 5. **M5 — Drop targets.** Drag-and-drop wired to `spanpaper set`. The
    moment this lands, the feature is the killer feature. **~½ day.**
 6. **M6 — File picker fallback + full menu.** `ashpd` file picker for
