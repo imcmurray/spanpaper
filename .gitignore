@@ -1,5 +1,6 @@
 /target
 /test-assets
+/dist
 Cargo.lock.bak
 *.swp
 *.tmp

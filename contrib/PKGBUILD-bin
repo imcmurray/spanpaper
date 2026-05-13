@@ -29,7 +29,7 @@ depends=('mpvpaper' 'swaybg')
 provides=("$_pkgname=$pkgver")
 conflicts=("$_pkgname")
 source=("$_pkgname-$pkgver-x86_64.tar.gz::$url/releases/download/v$pkgver/$_pkgname-$pkgver-x86_64.tar.gz")
-sha256sums=('SKIP')   # replaced by `updpkgsums -p PKGBUILD-bin` before AUR push
+sha256sums=('5653dd942438b5d0dbb551f46c4eabb82c70176ebe43edb1ff9289bee40913e0')
 
 package() {
     cd "$_pkgname-$pkgver-x86_64"
