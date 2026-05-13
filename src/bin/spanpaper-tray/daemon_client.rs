@@ -11,9 +11,25 @@
 use nix::{sys::signal::kill, unistd::Pid};
 use std::{
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Command,
 };
+
+/// Which slot of the wallpaper configuration a drop targets.
+#[derive(Copy, Clone, Debug)]
+pub enum Slot {
+    Span,
+    Side,
+}
+
+impl Slot {
+    fn flag(self) -> &'static str {
+        match self {
+            Slot::Span => "--span",
+            Slot::Side => "--side",
+        }
+    }
+}
 
 fn pid_file() -> Option<PathBuf> {
     let runtime = std::env::var_os("XDG_RUNTIME_DIR")?;
@@ -45,4 +61,25 @@ pub fn stop_daemon() -> std::io::Result<()> {
     // M2; a future milestone can move this into a tokio task so the
     // menu doesn't hang.
     Command::new("spanpaper").arg("stop").status().map(|_| ())
+}
+
+/// Assign a file to a slot. Shells out to `spanpaper set --span PATH`
+/// or `--side PATH`; the daemon does the atomic config write and
+/// SIGHUPs itself, returning in tens of milliseconds. Used by the
+/// drop targets in the palette.
+pub fn set_for(slot: Slot, path: &Path) -> std::io::Result<()> {
+    Command::new("spanpaper")
+        .args(["set", slot.flag()])
+        .arg(path)
+        .status()
+        .and_then(|s| {
+            if s.success() {
+                Ok(())
+            } else {
+                Err(std::io::Error::other(format!(
+                    "spanpaper set {} exited {s}",
+                    slot.flag()
+                )))
+            }
+        })
 }

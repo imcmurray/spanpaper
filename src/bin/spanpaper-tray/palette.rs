@@ -8,7 +8,11 @@
 //! M3 is static — no drag-and-drop, no file picker, no thumbnails.
 //! Those land in M4/M5/M6 per docs/tray-applet-plan.md.
 
-use crate::{outputs_query::OutputInfo, thumbnail};
+use crate::{
+    daemon_client::{self, Slot},
+    outputs_query::OutputInfo,
+    thumbnail,
+};
 use gtk4::prelude::*;
 use serde::Deserialize;
 use std::path::Path;
@@ -76,7 +80,7 @@ pub fn show(app: &gtk4::Application) {
     root.append(&summary_row("side", cfg.side.as_deref()));
 
     let hint = gtk4::Label::builder()
-        .label("Drop a file onto a box to assign it (coming in M5)")
+        .label("Drop an image or video onto a box to assign it")
         .css_classes(vec!["dim-label"])
         .build();
     hint.set_xalign(0.0);
@@ -132,13 +136,13 @@ fn build_layout_row(outputs: &[OutputInfo], cfg: &PartialConfig) -> gtk4::Box {
             .spacing(2)
             .build();
         for o in &span_outs {
-            group.append(&build_output_frame(o, cfg.span.as_deref(), scale, "span"));
+            group.append(&build_output_frame(o, cfg.span.as_deref(), scale, Slot::Span));
         }
         let leftmost_x = span_outs.iter().map(|o| o.x).min().unwrap_or(0);
         (leftmost_x, group)
     });
     let side_frame = side_out.map(|o| {
-        (o.x, build_output_frame(o, cfg.side.as_deref(), scale, "side"))
+        (o.x, build_output_frame(o, cfg.side.as_deref(), scale, Slot::Side))
     });
 
     let mut placed: Vec<(i32, gtk4::Widget)> = Vec::new();
@@ -165,8 +169,12 @@ fn build_output_frame(
     out: &OutputInfo,
     assigned: Option<&str>,
     scale: f32,
-    role: &str,
+    slot: Slot,
 ) -> gtk4::Frame {
+    let role = match slot {
+        Slot::Span => "span",
+        Slot::Side => "side",
+    };
     let w = ((out.width as f32) * scale).round().max(40.0) as i32;
     let h = ((out.height as f32) * scale).round().max(40.0) as i32;
 
@@ -176,6 +184,48 @@ fn build_output_frame(
         .width_request(w)
         .height_request(h)
         .build();
+
+    // Drop target: accept any gio::File (local files) dropped onto
+    // this frame. On drop, assign the file to this slot via the
+    // daemon CLI and close the popover so the user reopens it and
+    // sees the freshly-rendered thumbnail. Non-local files (Flatpak
+    // sandbox crossings) have no .path() — declined; M6's file
+    // picker will cover those via xdg-desktop-portal.
+    let drop_target = gtk4::DropTarget::new(
+        gtk4::gio::File::static_type(),
+        gtk4::gdk::DragAction::COPY,
+    );
+    let frame_for_close = frame.clone();
+    drop_target.connect_drop(move |_target, value, _x, _y| {
+        let file = match value.get::<gtk4::gio::File>() {
+            Ok(f) => f,
+            Err(e) => {
+                tracing::warn!("drop value not a File: {e}");
+                return false;
+            }
+        };
+        let Some(path) = file.path() else {
+            tracing::warn!(
+                "dropped file is not local (no path); M6 file picker will cover this case"
+            );
+            return false;
+        };
+        tracing::info!("drop on {role}: {}", path.display());
+        if let Err(e) = daemon_client::set_for(slot, &path) {
+            tracing::warn!("set {role}: {e:#}");
+            return false;
+        }
+        // Close the popover. The user reopens (left-click the tray)
+        // to see refreshed thumbnails. In-place refresh is a future
+        // polish item.
+        if let Some(root) = frame_for_close.root() {
+            if let Ok(win) = root.downcast::<gtk4::Window>() {
+                win.close();
+            }
+        }
+        true
+    });
+    frame.add_controller(drop_target);
 
     let inner = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Vertical)
