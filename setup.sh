@@ -9,7 +9,7 @@
 #   5. Installs the binary to ~/.local/bin/spanpaper
 #   6. Ensures ~/.local/bin is on PATH (prints a hint if not)
 #   7. Optionally installs a systemd --user unit OR an XDG autostart entry
-#   8. Optionally seeds the config if --video / --left-image are passed
+#   8. Optionally seeds the config if --span / --side are passed
 #
 # Idempotent: re-runs only do work that's still needed.
 
@@ -27,10 +27,10 @@ AUTOSTART_DST="$HOME/.config/autostart/spanpaper.desktop"
 
 AUTOSTART_MODE="ask"   # ask | systemd | xdg | none
 SKIP_PACMAN=0
-VIDEO=""
-LEFT_IMAGE=""
+SPAN=""
+SIDE=""
 SPAN_OUTPUTS=""
-IMAGE_OUTPUT=""
+SIDE_OUTPUT=""
 AUDIO=0
 START_NOW=0
 
@@ -41,10 +41,13 @@ Usage: $0 [options]
 Options:
   --autostart=systemd|xdg|none   How to autostart on login (default: ask)
   --skip-pacman                  Don't try to install system packages
-  --video PATH                   Pre-seed config: spanning MP4 path
-  --left-image PATH              Pre-seed config: static image for image monitor
+  --span PATH                    Pre-seed config: spanning media (image or video)
+                                 [aliases: --video]
+  --side PATH                    Pre-seed config: side-monitor media (image or video)
+                                 [aliases: --left-image]
   --span-outputs CSV             Override span outputs (e.g. HDMI-A-4,DP-6)
-  --image-output NAME            Override image output (e.g. DP-5)
+  --side-output NAME             Override side output (e.g. DP-5)
+                                 [aliases: --image-output]
   --audio                        Unmute video
   --start                        Start the daemon at the end
   -h, --help                     This help
@@ -52,7 +55,7 @@ Options:
 Examples:
   $0                                              # interactive
   $0 --autostart=systemd --start                  # install + enable + start
-  $0 --video ~/wall.mp4 --left-image ~/side.jpg \\
+  $0 --span ~/wall.mp4 --side ~/side.jpg \\
      --autostart=systemd --start                  # full setup in one shot
 EOF
 }
@@ -61,10 +64,10 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --autostart=*)      AUTOSTART_MODE="${1#*=}"; shift ;;
         --skip-pacman)      SKIP_PACMAN=1; shift ;;
-        --video)            VIDEO="$2"; shift 2 ;;
-        --left-image)       LEFT_IMAGE="$2"; shift 2 ;;
-        --span-outputs)     SPAN_OUTPUTS="$2"; shift 2 ;;
-        --image-output)     IMAGE_OUTPUT="$2"; shift 2 ;;
+        --span|--video)            SPAN="$2"; shift 2 ;;
+        --side|--left-image)       SIDE="$2"; shift 2 ;;
+        --span-outputs)            SPAN_OUTPUTS="$2"; shift 2 ;;
+        --side-output|--image-output) SIDE_OUTPUT="$2"; shift 2 ;;
         --audio)            AUDIO=1; shift ;;
         --start)            START_NOW=1; shift ;;
         -h|--help)          usage; exit 0 ;;
@@ -179,13 +182,13 @@ esac
 
 # ---- 7. Seed config (optional) -----------------------------------------------
 
-if [[ -n "$VIDEO$LEFT_IMAGE$SPAN_OUTPUTS$IMAGE_OUTPUT" ]] || (( AUDIO )); then
+if [[ -n "$SPAN$SIDE$SPAN_OUTPUTS$SIDE_OUTPUT" ]] || (( AUDIO )); then
     step "Seeding config"
     set_args=( set --no-reload )
-    [[ -n "$VIDEO"         ]] && set_args+=( --video "$VIDEO" )
-    [[ -n "$LEFT_IMAGE"    ]] && set_args+=( --left-image "$LEFT_IMAGE" )
+    [[ -n "$SPAN"          ]] && set_args+=( --span "$SPAN" )
+    [[ -n "$SIDE"          ]] && set_args+=( --side "$SIDE" )
     [[ -n "$SPAN_OUTPUTS"  ]] && set_args+=( --span-outputs "$SPAN_OUTPUTS" )
-    [[ -n "$IMAGE_OUTPUT"  ]] && set_args+=( --image-output "$IMAGE_OUTPUT" )
+    [[ -n "$SIDE_OUTPUT"   ]] && set_args+=( --side-output "$SIDE_OUTPUT" )
     (( AUDIO ))               && set_args+=( --audio )
     "$BIN_DST" "${set_args[@]}"
     ok "config saved -> ~/.config/spanpaper/config.toml"
@@ -259,8 +262,8 @@ fi
 
 echo
 echo "${C_BOLD}Done.${C_RST} Next:"
-if [[ -z "$VIDEO" ]]; then
-    echo "  spanpaper set --video /path/to/video.mp4 --left-image /path/to/image.jpg"
+if [[ -z "$SPAN" ]]; then
+    echo "  spanpaper set --span /path/to/anything --side /path/to/anything"
 fi
 if (( ! START_NOW )); then
     if [[ "$AUTOSTART_MODE" == "systemd" ]]; then

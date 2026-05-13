@@ -174,5 +174,7 @@ for f in "$SPAN_PNG" "$SPAN_MP4" "$SIDE_PNG"; do
 done
 echo
 echo "Apply with:"
-echo "  spanpaper set --video $SPAN_MP4 --left-image $SIDE_PNG"
+echo "  spanpaper set --span $SPAN_MP4 --side $SIDE_PNG"
+echo "  # (or use the PNG instead — auto-detected as a still image)"
+echo "  spanpaper set --span $SPAN_PNG"
 echo "  spanpaper start --background"

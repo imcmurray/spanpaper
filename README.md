@@ -1,23 +1,25 @@
 # spanpaper
 
-True single-MP4 video wallpaper spanning across stacked monitors on Wayland.
-One source video, sliced top/bottom (or left/right) across two outputs, no
-pre-splitting, hardware-accelerated, proper `wlr-layer-shell` background — and
-an independent static image on a third monitor.
+Single-source wallpaper that spans stacked monitors on Wayland — give it
+**any image or video** and one file gets sliced top/bottom (or left/right)
+across two outputs, no pre-splitting, hardware-accelerated, proper
+`wlr-layer-shell` background. A third monitor gets its own independent
+image or video.
 
 ## Status
 
 Built and **validated** on EndeavourOS + Budgie (wlroots Wayland) with:
 
-| Output     | Mode       | Role                         |
-|------------|------------|------------------------------|
-| `HDMI-A-4` | 1920×1080  | top half of the spanned video|
-| `DP-6`     | 1920×1080  | bottom half of the spanned video |
-| `DP-5`     | 1080×1920  | independent static image (portrait) |
+| Output     | Mode       | Role                                       |
+|------------|------------|--------------------------------------------|
+| `HDMI-A-4` | 1920×1080  | top half of the spanned content            |
+| `DP-6`     | 1920×1080  | bottom half of the spanned content         |
+| `DP-5`     | 1080×1920  | independent side content (image or video)  |
 
 Frame-level sync between the two `mpvpaper` instances was verified live via
-on-screen timestamps matching to the millisecond, and a diagonal + ring
-calibration confirmed the seam crop lines up to the pixel.
+on-screen timestamps matching to the millisecond; a diagonal + ring
+calibration confirmed the seam crop lines up to the pixel; and a hot-reload
+swap from MP4 → PNG → MP4 confirmed image/video auto-routing.
 
 ## Quick start
 
@@ -55,18 +57,22 @@ automates.
 `spanpaper` is a small Rust daemon that:
 
 1. Enumerates Wayland outputs natively via `wl_output` + `xdg-output`.
-2. For each output in `span_outputs`, spawns one `mpvpaper` that opens the
-   same source MP4 with a per-monitor `vf=crop=iw:ih/N:0:ih*i/N` filter.
-   Each instance only renders its slice; to the user it looks like one
-   continuous video stretched across the stack.
-3. For `image_output`, spawns one `swaybg` with the static image.
-4. Supervises children: restart-on-crash with linear backoff (caps at 5
+2. **Auto-detects content type** for each slot from the file extension (with
+   `file(1)` MIME fallback), then routes to the right backend:
+   * `span` slot (always mpvpaper, per-monitor crop):
+     - Video → libmpv decodes and renders its cropped slice
+     - Image → libmpv holds the single frame via `image-display-duration=inf`
+       and renders the cropped slice as a still
+   * `side` slot:
+     - Image → swaybg (lighter than libmpv for a still)
+     - Video → mpvpaper with no crop
+3. Supervises children: restart-on-crash with linear backoff (caps at 5
    rapid failures), `SIGTERM` → graceful shutdown, `SIGHUP` → hot reload
    of config without dropping workers longer than necessary.
 
-Both `mpvpaper` instances use libmpv's render API into their own
-`wlr-layer-shell` background surfaces with `hwdec=auto-safe`, so playback
-is hardware-decoded (VA-API on Intel/AMD, NVDEC on NVIDIA). Two decoders
+Every `mpvpaper` uses libmpv's render API into its own `wlr-layer-shell`
+background surface with `hwdec=auto-safe`, so video playback is
+hardware-decoded (VA-API on Intel/AMD, NVDEC on NVIDIA). Two decoders
 opening the same file start in lockstep and stay in sync at the millisecond
 level for the lifetime of a session.
 
@@ -132,11 +138,14 @@ Before pointing it at the wallpaper you actually want, run the included
 generator to produce a span-continuity test pattern:
 
 ```bash
-./gen-test-assets.sh
+./gen-test-assets.sh                       # writes test-assets/*.{png,mp4}
 spanpaper set \
-  --video      ./test-assets/test-span-1920x2160.mp4 \
-  --left-image ./test-assets/test-side-1080x1920.png
+  --span ./test-assets/test-span-1920x2160.mp4 \
+  --side ./test-assets/test-side-1080x1920.png
 spanpaper start --background
+
+# Try the image path too — same hot reload, no daemon restart needed:
+spanpaper set --span ./test-assets/test-span-1920x2160.png
 ```
 
 What to look for on the screens:
@@ -148,9 +157,11 @@ What to look for on the screens:
   duplicated.
 * **Row labels** `row 0…row 11` flow continuously across the seam (rows
   0–5 on the top monitor, 6–11 on the bottom).
-* **Two timestamps** appear straddling the seam — they should always match
-  digit-for-digit, proving frame-level sync between the two mpvpaper
-  instances.
+* **Two timestamps** appear straddling the seam (in the MP4 only) — they
+  should always match digit-for-digit, proving frame-level sync between
+  the two mpvpaper instances. The PNG version has no animated elements
+  but every static calibration mark (diagonal, circles, rows) still
+  applies.
 
 ## Autostart
 
@@ -190,13 +201,14 @@ spanpaper set --side ~/bar.mp4    # video on DP-5; mpvpaper instead of swaybg
 spanpaper set --span ~/foo.mp4 --no-reload    # rewrite only
 ```
 
-## Picking / encoding a source video
+## Picking / encoding source content
 
 The ideal source for a 1920×1080 + 1920×1080 vertical stack is a single
-**1920 × 2160** MP4. Anything else gets cropped/fit/stretched per the
-`video_fit` setting.
+**1920 × 2160** file — video *or* image. Anything else gets cropped, fit,
+or stretched per the `span_fit` setting (`crop` is the default — zoom-fill,
+may clip sides; `fit` letterboxes; `stretch` ignores aspect).
 
-Re-encode to hardware-decode-friendly H.264 8-bit `yuv420p`:
+### Video — re-encode to hardware-decode-friendly H.264 8-bit `yuv420p`:
 
 ```bash
 ffmpeg -i source.mp4 \
@@ -208,6 +220,18 @@ ffmpeg -i source.mp4 \
 
 `hwdec=auto-safe` is on by default, so VA-API/NVDEC kicks in when present.
 
+### Image — anything common works (JPG, PNG, WebP, AVIF, HEIC, GIF…):
+
+```bash
+# Resize to the combined-stack resolution for a perfect fit, no
+# crop/letterbox.
+magick source.jpg -resize 1920x2160^ -gravity center -extent 1920x2160 \
+                  ~/Wallpapers/span-1920x2160.jpg
+```
+
+Then just `spanpaper set --span ~/Wallpapers/span-1920x2160.jpg`. The image
+is held as a single frame; CPU drops to ~0% after the first paint.
+
 ## Troubleshooting
 
 | Symptom | Likely cause / fix |
@@ -216,6 +240,7 @@ ffmpeg -i source.mp4 \
 | `compositor does not expose zwlr_layer_shell_v1` | You're on Mutter/GNOME or X11; switch to a wlroots session |
 | Diagonal breaks at the seam in the test image | The two outputs aren't actually contiguous in the compositor's layout; check `spanpaper outputs` against your display configuration |
 | Two diagonals (one per monitor) instead of one | `span_outputs` lists only one output, or the daemon found one to be missing |
+| `unrecognised media type` on `spanpaper set` | File has an unknown extension *and* `file(1)` doesn't classify it as `image/*` or `video/*`. Re-encode to a common format, or install `file`: `sudo pacman -S file` |
 | Audio duplicated | spanpaper already restricts audio to the first span output; `spanpaper restart` resyncs |
 | High CPU on playback | Hardware decode failed to engage. Check with: `mpv --hwdec=auto-safe --vo=null --frames=1 yourfile.mp4 2>&1 \| grep -i hwdec` |
 | Daemon "not running" but `pgrep -f spanpaper` shows it | Stale pid file; `rm "$XDG_RUNTIME_DIR/spanpaper/spanpaper.pid"` then `spanpaper start` |
