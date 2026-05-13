@@ -180,7 +180,7 @@ fn start_workers() -> Result<Vec<Worker>> {
         }
     }
 
-    let plan = workers::plan(&cfg)?;
+    let plan = workers::plan(&cfg, &detected)?;
     let mut spawned = Vec::with_capacity(plan.len());
     for kind in plan {
         match Worker::spawn(kind) {
