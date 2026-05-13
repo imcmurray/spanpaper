@@ -319,7 +319,28 @@ them is "do everything else first."
 2. **M2 — Tray walking skeleton.** New binary behind `tray` feature,
    ksni icon in the panel, right-click menu with Start/Stop/Quit only,
    no popover. Proves cross-DE icon rendering on Budgie + at least one
-   other DE before we spend time on the popover. **~1 day.**
+   other DE before we spend time on the popover. **~1 day.** ✅ Done.
+   * Cargo gained `autobins = false` and explicit `[[bin]]` entries
+     for both `spanpaper` and `spanpaper-tray`; default builds remain
+     ksni/tokio-free, `cargo build --features tray` produces the
+     second binary.
+   * Sources under `src/bin/spanpaper-tray/` — `main.rs` (tokio
+     `current_thread` runtime, ksni `TrayService`, 2 s pid-file poll
+     for live menu state) and `daemon_client.rs` (pid-file +
+     `kill(pid, 0)` liveness, shellout to the existing CLI for
+     actions).
+   * Side-fix in `daemon::run`: replaced the `isatty(stdin)` guard
+     around `spawn_background()` with a `SPANPAPER_DAEMONIZED` env-var
+     sentinel. The TTY guard had left non-TTY callers (tray, XDG
+     autostart) running the supervisor in-process; removing it
+     naively caused an infinite re-exec loop. The env-var sentinel
+     does what the TTY check was really there for: tell the child
+     "you are the daemon, don't re-exec." Works for every caller now.
+   * M2 limitation worth knowing: menu activate callbacks are sync
+     (ksni's design), and `spanpaper stop` blocks up to 5 s — so
+     clicking Stop freezes the tray menu for that long. M3+ moves
+     blocking actions onto a tokio task and the menu stays
+     responsive.
 3. **M3 — Popover with static layout.** GTK4 window opens on left-click,
    shows monitor rectangles to scale with placeholder thumbnails. No DnD
    yet, no file picker. **~1 day.**

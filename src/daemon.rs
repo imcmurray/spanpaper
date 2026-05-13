@@ -79,7 +79,10 @@ pub fn stop() -> Result<()> {
     anyhow::bail!("daemon did not exit within 5s; pid {pid} still running");
 }
 
-/// Re-exec ourselves detached so the caller returns immediately.
+/// Re-exec ourselves detached so the caller returns immediately. Sets
+/// `SPANPAPER_DAEMONIZED=1` so the child's `daemon::run` recognises it
+/// IS the detached daemon and runs the supervisor in-process instead
+/// of re-execing again.
 pub fn spawn_background() -> Result<()> {
     use std::os::unix::process::CommandExt;
     let exe = std::env::current_exe().context("current_exe")?;
@@ -87,6 +90,7 @@ pub fn spawn_background() -> Result<()> {
         Command::new(&exe)
             .arg("start")
             .arg("--background")
+            .env("SPANPAPER_DAEMONIZED", "1")
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -102,10 +106,19 @@ pub fn spawn_background() -> Result<()> {
     Ok(())
 }
 
-/// Run the daemon. With `background = true` from a TTY we re-exec detached and
-/// return; otherwise we run the supervisor loop in-process.
+/// Run the daemon. With `background = true` we re-exec detached and
+/// return immediately; otherwise we run the supervisor loop in-process.
+///
+/// The re-exec child receives `SPANPAPER_DAEMONIZED=1` so it knows
+/// it IS the detached daemon and should NOT re-exec again — without
+/// this sentinel, `--background` would fork an infinite chain of
+/// processes that each re-exec and exit. (Earlier code used a TTY
+/// check for the same purpose, but that left tray-applet and XDG
+/// autostart callers — both of which lack a TTY — running the
+/// supervisor in-process and blocking themselves.)
 pub fn run(background: bool) -> Result<()> {
-    if background && nix::unistd::isatty(0).unwrap_or(false) {
+    let already_detached = std::env::var_os("SPANPAPER_DAEMONIZED").is_some();
+    if background && !already_detached {
         return spawn_background();
     }
 

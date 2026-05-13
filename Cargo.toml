@@ -2,7 +2,7 @@
 name = "spanpaper"
 version = "0.2.0"
 edition = "2021"
-rust-version = "1.74"
+rust-version = "1.80"
 authors = ["Ian McMurray <ian.mcmurray@gmail.com>"]
 description = "True single-MP4 video wallpaper spanning across stacked monitors on Wayland (wlr-layer-shell)"
 license = "MIT"
@@ -10,6 +10,24 @@ repository = "https://github.com/imcmurray/spanpaper"
 readme = "README.md"
 keywords = ["wayland", "wallpaper", "video", "layer-shell", "mpv"]
 categories = ["command-line-utilities"]
+# Disable auto-discovery of binaries so both `spanpaper` and (feature-gated)
+# `spanpaper-tray` come from explicit [[bin]] entries below.
+autobins = false
+
+[[bin]]
+name = "spanpaper"
+path = "src/main.rs"
+
+# Tray applet — feature-gated so default `cargo build` doesn't pull
+# ksni/tokio. See docs/tray-applet-plan.md for the full design.
+[[bin]]
+name              = "spanpaper-tray"
+path              = "src/bin/spanpaper-tray/main.rs"
+required-features = ["tray"]
+
+[features]
+default = []
+tray    = ["dep:ksni", "dep:tokio"]
 
 [dependencies]
 clap          = { version = "4.5", features = ["derive"] }
@@ -25,6 +43,10 @@ wayland-protocols = { version = "0.31", features = ["client", "unstable"] }
 nix           = { version = "0.27", features = ["signal", "process", "fs", "user"] }
 shellexpand   = "3"
 which         = "6"
+
+# Tray-only deps.
+ksni  = { version = "0.3", optional = true }
+tokio = { version = "1",   optional = true, features = ["rt", "macros", "time", "signal"] }
 
 [profile.release]
 lto           = "thin"
