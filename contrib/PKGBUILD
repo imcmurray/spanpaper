@@ -16,11 +16,15 @@
 pkgname=spanpaper
 pkgver=0.2.0
 pkgrel=1
-pkgdesc="Wayland wallpaper daemon that spans one image or video across stacked monitors"
+pkgdesc="Wayland wallpaper daemon + tray applet — single image or video spanned across stacked monitors"
 arch=('x86_64')
 url="https://github.com/imcmurray/spanpaper"
 license=('MIT')
-depends=('mpvpaper' 'swaybg')
+# mpvpaper + swaybg drive the wallpaper rendering. gtk4 and
+# gtk4-layer-shell are linked by the bundled tray applet; the daemon
+# itself doesn't need them at runtime, but we always ship both
+# binaries since 0.3.0 so the deps are unconditional.
+depends=('mpvpaper' 'swaybg' 'gtk4' 'gtk4-layer-shell')
 makedepends=('cargo')
 options=('!lto')   # Cargo.toml already sets `lto = "thin"`; let it own that knob.
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
@@ -36,7 +40,9 @@ build() {
     cd "$pkgname-$pkgver"
     export CARGO_HOME="$srcdir/cargo-home"
     export CARGO_TARGET_DIR="$srcdir/target"
-    cargo build --frozen --release
+    # --features tray pulls in ksni/tokio/gtk4/gtk4-layer-shell so the
+    # spanpaper-tray binary is produced alongside the daemon.
+    cargo build --frozen --release --features tray
 }
 
 package() {
@@ -44,23 +50,28 @@ package() {
 
     install -Dm755 "$srcdir/target/release/spanpaper" \
         "$pkgdir/usr/bin/spanpaper"
+    install -Dm755 "$srcdir/target/release/spanpaper-tray" \
+        "$pkgdir/usr/bin/spanpaper-tray"
 
-    # contrib templates have an @SPANPAPER_BIN@ placeholder that setup.sh
-    # substitutes for ad-hoc installs; for the packaged install we hard-code
-    # /usr/bin/spanpaper here so the units work without setup.sh.
+    # contrib templates have an @SPANPAPER_BIN@ / @SPANPAPER_TRAY_BIN@
+    # placeholder that setup.sh substitutes for ad-hoc installs; for
+    # the packaged install we hard-code /usr/bin/spanpaper{,-tray} here
+    # so the units work without setup.sh.
     install -d "$pkgdir/usr/lib/systemd/user"
     sed "s|@SPANPAPER_BIN@|/usr/bin/spanpaper|g" contrib/spanpaper.service \
         > "$pkgdir/usr/lib/systemd/user/spanpaper.service"
     chmod 644 "$pkgdir/usr/lib/systemd/user/spanpaper.service"
 
-    # Ship the XDG autostart .desktop as a sample, NOT in /etc/xdg/autostart,
-    # because installing it there would silently autostart for every user of
-    # the box. Users who want autostart on XDG-driven sessions (Budgie, GNOME,
-    # KDE, etc.) copy it into ~/.config/autostart/.
+    # Ship the XDG autostart .desktops as samples, NOT in /etc/xdg/autostart,
+    # because installing them there would silently autostart for every user
+    # of the box. Users who want autostart copy them into ~/.config/autostart/.
     install -d "$pkgdir/usr/share/spanpaper/autostart"
     sed "s|@SPANPAPER_BIN@|/usr/bin/spanpaper|g" contrib/spanpaper.desktop \
         > "$pkgdir/usr/share/spanpaper/autostart/spanpaper.desktop"
     chmod 644 "$pkgdir/usr/share/spanpaper/autostart/spanpaper.desktop"
+    sed "s|@SPANPAPER_TRAY_BIN@|/usr/bin/spanpaper-tray|g" contrib/spanpaper-tray.desktop \
+        > "$pkgdir/usr/share/spanpaper/autostart/spanpaper-tray.desktop"
+    chmod 644 "$pkgdir/usr/share/spanpaper/autostart/spanpaper-tray.desktop"
 
     # "Open With" entries for file-manager right-click → set as span/side.
     # These land in /usr/share/applications/ (NOT NoDisplay-skipped from MIME

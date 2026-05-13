@@ -30,15 +30,22 @@ clone, no Rust toolchain, no compile:
 
 ```bash
 # Substitute the latest version — check the Releases page.
-VERSION=0.2.0 PKGREL=1
+VERSION=0.3.0 PKGREL=1
 curl -LO "https://github.com/imcmurray/spanpaper/releases/download/v$VERSION/spanpaper-bin-$VERSION-$PKGREL-x86_64.pkg.tar.zst"
 sudo pacman -U "spanpaper-bin-$VERSION-$PKGREL-x86_64.pkg.tar.zst"
-yay -S mpvpaper swaybg   # runtime deps, if not already installed
 ```
 
-The package puts the binary at `/usr/bin/spanpaper`, a (not-enabled)
-systemd `--user` unit at `/usr/lib/systemd/user/spanpaper.service`, and
-a sample XDG autostart entry at `/usr/share/spanpaper/autostart/spanpaper.desktop`.
+Pacman pulls every runtime dep (`mpvpaper`, `swaybg`, `gtk4`,
+`gtk4-layer-shell`) and installs both binaries:
+
+* `/usr/bin/spanpaper` — the daemon
+* `/usr/bin/spanpaper-tray` — the optional panel applet (see
+  [Tray applet](#tray-applet-optional))
+
+Plus a (not-enabled) systemd `--user` unit at
+`/usr/lib/systemd/user/spanpaper.service` and sample XDG autostart
+entries at `/usr/share/spanpaper/autostart/spanpaper{,-tray}.desktop`
+that you can copy into `~/.config/autostart/` to start at login.
 Uninstall is `sudo pacman -R spanpaper-bin`.
 
 ### Any wlroots Wayland distro — build from source
@@ -265,23 +272,27 @@ running, pause glyph when paused, stop glyph when the daemon is down.
 Closing the palette (clicking outside, or the X) only closes the
 window — the tray keeps running in the panel.
 
-The tray is **feature-gated** (`cargo build --features tray`) so the
-default daemon build stays GTK-free. To install it via `setup.sh`:
+The tray is **feature-gated** (`cargo build --features tray`) so a
+default `cargo build` stays GTK-free for power users who only want
+the daemon. The pacman package and `setup.sh --with-tray` both ship
+the tray:
 
 ```bash
+# Source path:
 ./setup.sh --with-tray --autostart=xdg --start
 ```
 
 That builds both binaries, installs the autostart entry
 (`~/.config/autostart/spanpaper-tray.desktop`), and starts the
-daemon. Launch the tray once by hand to see it now:
+daemon. The pacman install path bundles `/usr/bin/spanpaper-tray`
+and the sample autostart at
+`/usr/share/spanpaper/autostart/spanpaper-tray.desktop` — copy that
+into `~/.config/autostart/` to auto-launch the tray at login, or run
+it on demand:
 
 ```bash
 spanpaper-tray &
 ```
-
-The pacman packages currently ship the daemon only. If you want the
-tray on Arch, use the source-install path above.
 
 > **GNOME note**: tray icons need an AppIndicator extension on GNOME
 > Shell (built in on Budgie, KDE Plasma, Cinnamon, MATE; waybar

@@ -9,7 +9,8 @@
 # Pipeline:
 #   1. Sanity: clean tree, on main, up to date with origin.
 #   2. Bump version in Cargo.toml and both contrib/PKGBUILD*.
-#   3. cargo build --release  (smoke test before tagging).
+#   3. cargo build --release --features tray (smoke test + builds the
+#      tray applet binary that ships in the release tarball).
 #   4. Commit the bump, tag vX.Y.Z, push main + tag.
 #   5. Stage the prebuilt binary tarball into dist/.
 #   6. Update PKGBUILD sha256sums against the live tarballs.
@@ -132,8 +133,10 @@ done
 
 # ---- step 3: smoke build -----------------------------------------------------
 
-step "cargo build --release (smoke test)"
-cargo build --release --quiet
+step "cargo build --release --features tray (smoke test + tray binary)"
+cargo build --release --features tray --quiet
+[[ -x target/release/spanpaper ]]      || die "no spanpaper binary"
+[[ -x target/release/spanpaper-tray ]] || die "no spanpaper-tray binary"
 
 # Refresh Cargo.lock against the new version so the commit + tag includes it.
 git add Cargo.toml Cargo.lock contrib/PKGBUILD contrib/PKGBUILD-bin
@@ -159,8 +162,10 @@ trap 'rm -rf "$STAGE"' EXIT
 PKGDIR="$STAGE/spanpaper-$VERSION-x86_64"
 mkdir -p "$PKGDIR/contrib"
 cp target/release/spanpaper            "$PKGDIR/spanpaper"
+cp target/release/spanpaper-tray       "$PKGDIR/spanpaper-tray"
 cp contrib/spanpaper.service           "$PKGDIR/contrib/"
 cp contrib/spanpaper.desktop           "$PKGDIR/contrib/"
+cp contrib/spanpaper-tray.desktop      "$PKGDIR/contrib/"
 cp contrib/spanpaper-set-span.desktop  "$PKGDIR/contrib/"
 cp contrib/spanpaper-set-side.desktop  "$PKGDIR/contrib/"
 cp README.md LICENSE                   "$PKGDIR/"

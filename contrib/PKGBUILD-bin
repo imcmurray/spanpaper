@@ -23,11 +23,15 @@ pkgname=spanpaper-bin
 _pkgname=spanpaper
 pkgver=0.2.0
 pkgrel=1
-pkgdesc="Wayland wallpaper daemon that spans one image or video across stacked monitors (prebuilt binary)"
+pkgdesc="Wayland wallpaper daemon + tray applet — single image or video spanned across stacked monitors (prebuilt binary)"
 arch=('x86_64')
 url="https://github.com/imcmurray/spanpaper"
 license=('MIT')
-depends=('mpvpaper' 'swaybg')
+# mpvpaper + swaybg drive the wallpaper rendering. gtk4 and
+# gtk4-layer-shell are linked by the optional tray applet; the daemon
+# alone doesn't need them, but since 0.3.0 ships both binaries we make
+# the deps unconditional so a fresh `pacman -U` install just works.
+depends=('mpvpaper' 'swaybg' 'gtk4' 'gtk4-layer-shell')
 provides=("$_pkgname=$pkgver")
 conflicts=("$_pkgname")
 source=("$_pkgname-$pkgver-x86_64.tar.gz::$url/releases/download/v$pkgver/$_pkgname-$pkgver-x86_64.tar.gz")
@@ -36,7 +40,8 @@ sha256sums=('5653dd942438b5d0dbb551f46c4eabb82c70176ebe43edb1ff9289bee40913e0')
 package() {
     cd "$_pkgname-$pkgver-x86_64"
 
-    install -Dm755 spanpaper "$pkgdir/usr/bin/spanpaper"
+    install -Dm755 spanpaper      "$pkgdir/usr/bin/spanpaper"
+    install -Dm755 spanpaper-tray "$pkgdir/usr/bin/spanpaper-tray"
 
     install -d "$pkgdir/usr/lib/systemd/user"
     sed "s|@SPANPAPER_BIN@|/usr/bin/spanpaper|g" contrib/spanpaper.service \
@@ -47,6 +52,10 @@ package() {
     sed "s|@SPANPAPER_BIN@|/usr/bin/spanpaper|g" contrib/spanpaper.desktop \
         > "$pkgdir/usr/share/spanpaper/autostart/spanpaper.desktop"
     chmod 644 "$pkgdir/usr/share/spanpaper/autostart/spanpaper.desktop"
+
+    sed "s|@SPANPAPER_TRAY_BIN@|/usr/bin/spanpaper-tray|g" contrib/spanpaper-tray.desktop \
+        > "$pkgdir/usr/share/spanpaper/autostart/spanpaper-tray.desktop"
+    chmod 644 "$pkgdir/usr/share/spanpaper/autostart/spanpaper-tray.desktop"
 
     # "Open With" entries for file-manager right-click → set as span/side.
     install -d "$pkgdir/usr/share/applications"
