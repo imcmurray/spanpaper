@@ -25,8 +25,11 @@ swap from MP4 → PNG → MP4 confirmed image/video auto-routing.
 
 ```bash
 git clone <this repo> && cd spanpaper
-./setup.sh --autostart=systemd --start         # build + install + enable + start
+./setup.sh --autostart=xdg --start             # build + install + enable + start
 ```
+
+(Use `--autostart=systemd` instead on Sway/Hyprland/river/etc. — see
+[Autostart](#autostart) for which path your session needs.)
 
 Then point it at content:
 
@@ -67,10 +70,12 @@ automates.
    of config without dropping workers longer than necessary.
 
 Every `mpvpaper` uses libmpv's render API into its own `wlr-layer-shell`
-background surface with `hwdec=auto-safe`, so video playback is
-hardware-decoded (VA-API on Intel/AMD, NVDEC on NVIDIA). Two decoders
-opening the same file start in lockstep and stay in sync at the millisecond
-level for the lifetime of a session.
+background surface. Video playback is hardware-decoded (VA-API on Intel/AMD,
+NVDEC on NVIDIA): span workers run `hwdec=auto-copy-safe` so libavfilter
+sees CPU-resident frames for the scale/crop chain; the solo side worker
+runs the slightly faster `hwdec=auto-safe` because it doesn't apply
+software filters. Two decoders opening the same file start in lockstep and
+stay in sync at the millisecond level for the lifetime of a session.
 
 ## Requirements
 
@@ -224,7 +229,8 @@ ffmpeg -i source.mp4 \
   ~/Wallpapers/span-1920x2160.mp4
 ```
 
-`hwdec=auto-safe` is on by default, so VA-API/NVDEC kicks in when present.
+Hardware decoding (VA-API/NVDEC) is on by default — see [How it works](#how-it-works)
+for the exact `hwdec` mode chosen per worker.
 
 ### Image — anything common works (JPG, PNG, WebP, AVIF, HEIC, GIF…):
 
@@ -267,7 +273,7 @@ spanpaper/
 └── src/
     ├── main.rs                tracing init + CLI dispatch
     ├── cli.rs                 clap definitions
-    ├── config.rs              TOML load/save (atomic write, schema migrations)
+    ├── config.rs              TOML load/save (atomic write)
     ├── media.rs               image-vs-video content-type detection
     ├── outputs.rs             wl_output + xdg-output enumeration
     ├── workers.rs             mpvpaper / swaybg subprocess plan & supervisors
