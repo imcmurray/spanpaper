@@ -1,5 +1,23 @@
 # spanpaper — outstanding work
 
+## ✅ Shipped in v0.3.1
+
+- **`spanpaper install [--method=xdg|systemd|both] [--start]`** —
+  one-command autostart wiring. Generates the autostart entries
+  inline from `current_exe()` (works for both pacman installs at
+  `/usr/bin` and source installs at `~/.local/bin`). `--method=xdg`
+  writes `~/.config/autostart/spanpaper.desktop`; `--method=systemd`
+  writes `~/.config/systemd/user/spanpaper.service` and runs
+  `systemctl --user enable`; `--method=both` does both. `--start`
+  additionally launches the daemon and tray now, gated on existence
+  checks so re-runs don't spawn duplicates. The tray always uses XDG
+  regardless of method.
+- **`release.sh` pre-seeds the local tarball into makepkg's working
+  dir** — the v0.3.0 release blew up at the makepkg step because
+  `PKGBUILD-bin`'s `source=` URL pointed at the GitHub release asset
+  that the *next* script step uploads (chicken-and-egg). Fix is one
+  cp; v0.3.0 was finished by hand, v0.3.1+ run end-to-end.
+
 ## ✅ Shipped in v0.3.0
 
 - **Native Wayland output enumeration** (wl_output + xdg-output;

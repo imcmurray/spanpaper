@@ -30,7 +30,8 @@ clone, no Rust toolchain, no compile:
 
 ```bash
 # Substitute the latest version — check the Releases page.
-VERSION=0.3.1 PKGREL=1
+VERSION=0.3.1
+PKGREL=1
 curl -LO "https://github.com/imcmurray/spanpaper/releases/download/v$VERSION/spanpaper-bin-$VERSION-$PKGREL-x86_64.pkg.tar.zst"
 sudo pacman -U "spanpaper-bin-$VERSION-$PKGREL-x86_64.pkg.tar.zst"
 spanpaper install --start
@@ -234,34 +235,65 @@ What to look for on the screens:
 
 ## Autostart
 
-Three options, install whichever you prefer (`setup.sh` automates this).
-The two paths are safe to coexist — `spanpaper start` checks the pid file
-and exits cleanly if a daemon is already running.
-
-**A. XDG autostart `.desktop`** (required on Budgie; works on most XDG sessions):
+The one-command path (works for both daemon and tray, source or
+pacman install):
 
 ```bash
-install -Dm644 contrib/spanpaper.desktop ~/.config/autostart/spanpaper.desktop
+spanpaper install --start                  # XDG autostart, launches now
+spanpaper install --method=systemd --start # systemd --user unit, launches now
+spanpaper install --method=both --start    # both, for portability across machines
 ```
 
-> **Budgie note**: Budgie's session does *not* activate
-> `graphical-session.target`, so any systemd `--user` unit gated on that
-> target will stay inactive across logins. XDG autostart is the reliable
-> path here. Verify with `systemctl --user list-units --state=active --type=target`
-> — if `graphical-session.target` isn't listed, install the `.desktop` above.
+That writes `~/.config/autostart/spanpaper.desktop` (and
+`spanpaper-tray.desktop` if the tray binary is installed), and
+optionally `~/.config/systemd/user/spanpaper.service`. Re-runs are
+idempotent — the autostart entries get rewritten, already-running
+daemon and tray are left alone.
 
-**B. systemd `--user` unit** (preferred on Sway/Hyprland/river/etc. — anything
-that *does* activate `graphical-session.target`; gives restart-on-failure
-plus journald logs):
+`spanpaper install --start` figures out paths from `current_exe()`,
+so it works equally well after `pacman -U …spanpaper-bin.pkg.tar.zst`
+(binaries at `/usr/bin`) and after `setup.sh` (binaries at
+`~/.local/bin`).
+
+### Method picker
+
+| Method    | Where it writes                                | Best for |
+|-----------|------------------------------------------------|----------|
+| `xdg`     | `~/.config/autostart/spanpaper.desktop`        | Budgie and any other XDG-compliant session — the safe default. |
+| `systemd` | `~/.config/systemd/user/spanpaper.service`     | Sway / Hyprland / river / KDE Plasma Wayland — adds restart-on-failure and `journalctl --user -u spanpaper -f` logs. |
+| `both`    | Both of the above                              | Portable installs across heterogeneous sessions. |
+
+The tray always uses XDG regardless of method — no `.service` is
+shipped for it because restart-on-failure isn't important for a UI
+applet.
+
+> **Budgie note**: Budgie's session does *not* activate
+> `graphical-session.target` and does not import `WAYLAND_DISPLAY`
+> into the systemd `--user` environment, so a `--method=systemd`
+> unit stays inactive across logins on Budgie. Stick with `xdg`
+> there. Verify with `systemctl --user list-units --state=active
+> --type=target` — if `graphical-session.target` isn't listed, the
+> XDG path is your answer.
+
+### Manual / scripted alternatives
+
+If you'd rather not call `spanpaper install`, `setup.sh` accepts
+`--autostart=xdg`, `--autostart=systemd`, or `--autostart=none`. Or
+do it by hand:
 
 ```bash
+# Manual XDG autostart
+install -Dm644 contrib/spanpaper.desktop ~/.config/autostart/spanpaper.desktop
+
+# Manual systemd --user
 install -Dm644 contrib/spanpaper.service ~/.config/systemd/user/spanpaper.service
 systemctl --user daemon-reload
 systemctl --user enable --now spanpaper.service
 journalctl --user -u spanpaper -f       # live logs
 ```
 
-**C. Budgie Menu → Startup Applications** → command `spanpaper start --background`.
+Or just launch from your DE's "Startup Applications" with
+`spanpaper start --background`.
 
 ## Tray applet (optional)
 

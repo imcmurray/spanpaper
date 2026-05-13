@@ -616,3 +616,33 @@ Unchanged:
   src/media.rs, src/cli.rs
   (the daemon stays a pure CLI; tray is a client of it)
 ```
+
+---
+
+## Post-release polish in v0.3.1
+
+The original plan ended at M7. Two follow-up items landed under the
+v0.3.1 tag after user testing:
+
+* **`spanpaper install [--method=xdg|systemd|both] [--start]`** —
+  one-command post-pacman setup. Generates autostart entries inline
+  from `current_exe()` (so it works for both `/usr/bin` and
+  `~/.local/bin` installs), writes
+  `~/.config/autostart/spanpaper.desktop` (XDG) or
+  `~/.config/systemd/user/spanpaper.service` (systemd) or both, and
+  optionally launches the daemon + tray right away. Existence-gated
+  so reruns don't stack processes. The tray always uses XDG —
+  restart-on-failure isn't a UI concern. **This makes the
+  post-install user flow three commands total: `curl …pacman -U …
+  spanpaper install --start`**, vs. the four-step manual dance the
+  M2-M7 work would otherwise have left.
+* **`release.sh` chicken-and-egg fix** — the v0.3.0 release tripped
+  at the makepkg step because `PKGBUILD-bin`'s `source=` URL points
+  to the GitHub release asset the *next* script step uploads. Fix is
+  one `cp "$BIN_TARBALL" "$MAKEPKG_DIR/"`; makepkg uses the local
+  copy instead of trying to download. v0.3.0 was completed by hand;
+  v0.3.1 ran the script end-to-end.
+
+The tray plan is now closed. Future tray work (focus-out keybindings,
+in-popover video preview, etc.) belongs in regular `TODO.md` rather
+than another milestone doc.
