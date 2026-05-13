@@ -272,15 +272,27 @@ fn spawn_mpv(
     let bin = which::which("mpvpaper")
         .context("`mpvpaper` not found on PATH (install: pacman -S mpvpaper)")?;
 
-    let mut opts: Vec<String> = vec![
-        "loop-file=inf".into(),
-        "hwdec=auto-safe".into(),
-    ];
+    let mut opts: Vec<String> = vec!["loop-file=inf".into()];
+    if vf.is_some() {
+        // Software filters (scale/crop) need CPU-resident frames; pure
+        // `hwdec=auto-safe` keeps frames in CUDA/VAAPI memory and our
+        // libavfilter chain then silently fails (`crop: Failed to configure
+        // input pad on filter`) because it doesn't speak hwframes. Use the
+        // copy-back variant so the decoder still runs on the GPU but frames
+        // are downloaded to RAM before the filter graph.
+        opts.push("hwdec=auto-copy-safe".into());
+    } else {
+        opts.push("hwdec=auto-safe".into());
+    }
     if let Some(v) = vf {
         opts.push(format!("vf={v}"));
-        // vf already produced exact-monitor-size output; tell mpv not to
-        // muck with aspect.
-        opts.push("keepaspect=yes".into());
+        // Our vf chain produces output sized exactly to the monitor. mpv's
+        // default keepaspect=yes preserves the *source* aspect (e.g. 928:1376
+        // for a portrait source), which would pillarbox the chain's
+        // already-correct 1920x1080 output back inside the source aspect.
+        // keepaspect=no makes mpv display the post-filter frame 1:1 to the
+        // VO surface — no second-guessing, no bars.
+        opts.push("keepaspect=no".into());
     } else {
         // Solo (side video): mpv handles fit.
         match fit {
