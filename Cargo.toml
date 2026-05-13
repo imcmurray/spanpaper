@@ -27,7 +27,7 @@ required-features = ["tray"]
 
 [features]
 default = []
-tray    = ["dep:ksni", "dep:tokio"]
+tray    = ["dep:ksni", "dep:tokio", "dep:gtk4", "dep:async-channel"]
 
 [dependencies]
 clap          = { version = "4.5", features = ["derive"] }
@@ -45,8 +45,10 @@ shellexpand   = "3"
 which         = "6"
 
 # Tray-only deps.
-ksni  = { version = "0.3", optional = true }
-tokio = { version = "1",   optional = true, features = ["rt", "macros", "time", "signal"] }
+ksni          = { version = "0.3", optional = true }
+tokio         = { version = "1",   optional = true, features = ["rt", "macros", "time", "signal"] }
+gtk4          = { version = "0.9", optional = true }
+async-channel = { version = "2",   optional = true }
 
 [profile.release]
 lto           = "thin"

@@ -343,7 +343,38 @@ them is "do everything else first."
      responsive.
 3. **M3 — Popover with static layout.** GTK4 window opens on left-click,
    shows monitor rectangles to scale with placeholder thumbnails. No DnD
-   yet, no file picker. **~1 day.**
+   yet, no file picker. **~1 day.** ✅ Done.
+   * `gtk4 = "0.9"` and `async-channel = "2"` added under the `tray`
+     feature so default daemon builds remain GTK-free.
+   * Threading: GTK4 main loop on the main thread (required by GTK);
+     tokio current-thread runtime + ksni service on a worker thread;
+     `async_channel<UiMsg>` bridges them. ksni's `activate(x, y)`
+     left-click handler does a non-blocking `try_send`; a
+     `glib::spawn_future_local` task on the GTK side receives and
+     calls `palette::show`. Right-click menu gained an **Open
+     palette** item that uses the same channel so the right-click
+     path works on DEs whose panels deliver left-click as a menu
+     trigger.
+   * `outputs_query::list` shells out to `spanpaper outputs` and
+     parses the tab-separated rows — keeps the tray a pure CLI
+     client of the daemon, no module imports across binaries.
+   * `palette.rs` builds the popover: top-level horizontal GtkBox
+     containing the span group (GtkBox oriented per
+     `span_direction`) and the standalone side, **ordered left-to-
+     right by each output's actual x-coordinate on the desktop** so
+     "what you see is what you set" holds even when the side
+     monitor sits to the left of the span pair. Each output renders
+     as a GtkFrame sized proportionally to its real pixel
+     dimensions (`MAX_EDGE_PX = 220`), with the output name,
+     resolution, and current filename basename inside. A
+     placeholder `Change…` button is shown disabled with a tooltip
+     pointing to M6 (file-picker fallback).
+   * `app.hold()` returns a guard that must be kept alive —
+     `mem::forget` is the documented pattern for "hold for the
+     whole app lifetime so closing the palette window doesn't
+     terminate the tray."
+   * One unit test covers the `spanpaper outputs` parser against
+     the known three-monitor layout (HDMI-A-4 / DP-5 / DP-6).
 4. **M4 — Real thumbnails.** Reads current config, renders cached image
    thumbnails per slot. ffmpeg video-frame extraction with graceful
    fallback. **~½ day.**
