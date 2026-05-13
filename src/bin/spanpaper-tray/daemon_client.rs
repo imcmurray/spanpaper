@@ -148,9 +148,8 @@ pub fn set_for(slot: Slot, path: &Path) -> std::io::Result<()> {
 }
 
 /// Set the `span_fit` config key. `value` must be "crop" / "fit" / "stretch".
-/// Affects mpvpaper's vf chain on the span pair (always) AND the side
-/// worker when side is a video (current daemon quirk — side_mode only
-/// applies to swaybg, which is the image path).
+/// Affects mpvpaper's vf chain on the span pair only — side has its
+/// own independent `side_fit`.
 pub fn set_span_fit(value: &str) -> std::io::Result<()> {
     let status = Command::new("spanpaper")
         .args(["set", "--span-fit", value])
@@ -162,17 +161,17 @@ pub fn set_span_fit(value: &str) -> std::io::Result<()> {
     }
 }
 
-/// Set the `side_mode` config key — swaybg's fit mode for when the
-/// side slot is an IMAGE. Values: fill | fit | stretch | center | tile.
-/// (Side videos use span_fit; see comment on `set_span_fit`.)
-pub fn set_side_mode(value: &str) -> std::io::Result<()> {
+/// Set the `side_fit` config key — independent of span_fit, applies
+/// to both side images (swaybg) and side videos (mpv). Values match
+/// span_fit: "crop" / "fit" / "stretch".
+pub fn set_side_fit(value: &str) -> std::io::Result<()> {
     let status = Command::new("spanpaper")
-        .args(["set", "--side-mode", value])
+        .args(["set", "--side-fit", value])
         .status()?;
     if status.success() {
         Ok(())
     } else {
-        Err(std::io::Error::other(format!("spanpaper set --side-mode {value} exited {status}")))
+        Err(std::io::Error::other(format!("spanpaper set --side-fit {value} exited {status}")))
     }
 }
 

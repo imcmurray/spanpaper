@@ -146,7 +146,8 @@ spanpaper set \
   --side         ~/Wallpapers/anything.jpg-or-mp4 \
   --span-outputs HDMI-A-4,DP-6 \
   --side-output  DP-5 \
-  --side-mode    fill
+  --span-fit     crop \
+  --side-fit     crop
 ```
 
 Example written config:
@@ -157,9 +158,9 @@ side         = "/home/you/Wallpapers/forest.jpg"          # image or video
 audio        = false
 span_outputs = ["HDMI-A-4", "DP-6"]
 side_output  = "DP-5"
-side_mode    = "fill"              # swaybg: fill | fit | stretch | center | tile
 span_direction = "vertical"        # "vertical" stacks | "horizontal" side-by-side
 span_fit     = "crop"              # crop (zoom-fill) | fit (letterbox) | stretch
+side_fit     = "crop"              # same three values; independent of span_fit
 extra_mpv_options = []             # raw mpv opts appended to every video worker
 ```
 

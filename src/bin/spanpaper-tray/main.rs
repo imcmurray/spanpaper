@@ -155,16 +155,17 @@ impl Tray for SpanpaperTray {
 
             items.push(
                 SubMenu {
-                    // swaybg's modes; applies to side images. Side videos
-                    // currently inherit Span fit (pre-existing daemon
-                    // quirk — documented in daemon_client::set_span_fit).
-                    label: "Side mode (image)".into(),
+                    // Same three options as Span fit, independently
+                    // applied to side (image AND video). swaybg's
+                    // backend-specific modes (center / tile) remain
+                    // available via `spanpaper set --side-mode …` for
+                    // power users — kept out of the menu so the two
+                    // fit options stay symmetric.
+                    label: "Side fit".into(),
                     submenu: vec![
-                        side_mode_item("Fill (default)", "fill"),
-                        side_mode_item("Fit", "fit"),
-                        side_mode_item("Stretch", "stretch"),
-                        side_mode_item("Center", "center"),
-                        side_mode_item("Tile", "tile"),
+                        side_fit_item("Crop (zoom-fill, default)", "crop"),
+                        side_fit_item("Fit (letterbox)", "fit"),
+                        side_fit_item("Stretch", "stretch"),
                     ],
                     ..Default::default()
                 }
@@ -278,12 +279,12 @@ fn span_fit_item(label: &str, value: &'static str) -> MenuItem<SpanpaperTray> {
     .into()
 }
 
-fn side_mode_item(label: &str, value: &'static str) -> MenuItem<SpanpaperTray> {
+fn side_fit_item(label: &str, value: &'static str) -> MenuItem<SpanpaperTray> {
     StandardItem {
         label: label.into(),
         activate: Box::new(move |_| {
-            if let Err(e) = daemon_client::set_side_mode(value) {
-                tracing::warn!("set side-mode {value}: {e}");
+            if let Err(e) = daemon_client::set_side_fit(value) {
+                tracing::warn!("set side-fit {value}: {e}");
             }
         }),
         ..Default::default()

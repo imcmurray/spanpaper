@@ -33,11 +33,6 @@ pub struct Config {
     #[serde(default = "default_side_output")]
     pub side_output: Option<String>,
 
-    /// Fit mode for the side content when it's an image (passed to swaybg).
-    /// Values: fill | fit | stretch | center | tile.
-    #[serde(default = "default_side_mode")]
-    pub side_mode: String,
-
     /// Direction of the span. "vertical" = top/bottom (default);
     /// "horizontal" = left/right.
     #[serde(default = "default_span_direction")]
@@ -54,6 +49,13 @@ pub struct Config {
     ///   `stretch` = ignore aspect, stretch to canvas dimensions
     #[serde(default = "default_span_fit")]
     pub span_fit: String,
+
+    /// Fit mode for the side content — independent of `span_fit`. Same
+    /// three values (`crop`/`fit`/`stretch`) apply to both side images
+    /// (mapped to swaybg's fill/fit/stretch) and side videos (mpv
+    /// panscan/keepaspect, same translation as for span).
+    #[serde(default = "default_side_fit")]
+    pub side_fit: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -67,9 +69,9 @@ fn default_span_outputs() -> Vec<String> {
     vec!["HDMI-A-4".into(), "DP-6".into()]
 }
 fn default_side_output() -> Option<String> { Some("DP-5".into()) }
-fn default_side_mode() -> String { "fill".into() }
 fn default_span_direction() -> SpanDirection { SpanDirection::Vertical }
 fn default_span_fit() -> String { "crop".into() }
+fn default_side_fit() -> String { "crop".into() }
 
 impl Default for Config {
     fn default() -> Self {
@@ -79,10 +81,10 @@ impl Default for Config {
             audio: false,
             span_outputs: default_span_outputs(),
             side_output: default_side_output(),
-            side_mode: default_side_mode(),
             span_direction: default_span_direction(),
             extra_mpv_options: vec![],
             span_fit: default_span_fit(),
+            side_fit: default_side_fit(),
         }
     }
 }

@@ -60,13 +60,14 @@ pub struct SetArgs {
     #[arg(long, value_name = "NAME")]
     pub side_output: Option<String>,
 
-    /// Fit mode for the side content when it's an image: fill | fit | stretch | center | tile.
-    #[arg(long, value_name = "MODE")]
-    pub side_mode: Option<String>,
-
     /// Fit mode for the span content: crop | fit | stretch.
     #[arg(long, value_name = "MODE")]
     pub span_fit: Option<String>,
+
+    /// Fit mode for the side content: crop | fit | stretch. Independent
+    /// of --span-fit. Applies to both side images and side videos.
+    #[arg(long, value_name = "MODE")]
+    pub side_fit: Option<String>,
 
     /// Don't reload the running daemon after writing config.
     #[arg(long)]
@@ -111,8 +112,8 @@ fn cmd_set(a: SetArgs) -> Result<()> {
     if a.no_audio{ cfg.audio = false; }
     if let Some(s) = a.span_outputs { cfg.span_outputs = s; }
     if let Some(o) = a.side_output  { cfg.side_output = Some(o); }
-    if let Some(m) = a.side_mode    { cfg.side_mode = m; }
     if let Some(f) = a.span_fit     { cfg.span_fit = f; }
+    if let Some(f) = a.side_fit     { cfg.side_fit = f; }
 
     cfg.save().context("saving config")?;
     tracing::info!("config saved to {}", Config::path()?.display());
@@ -147,8 +148,8 @@ fn cmd_status() -> Result<()> {
             println!("  audio        = {}", cfg.audio);
             println!("  span_outputs = {:?}", cfg.span_outputs);
             println!("  side_output  = {:?}", cfg.side_output);
-            println!("  side_mode    = {}", cfg.side_mode);
             println!("  span_fit     = {}", cfg.span_fit);
+            println!("  side_fit     = {}", cfg.side_fit);
         }
         Err(e) => println!("config: <missing or invalid> ({e})"),
     }

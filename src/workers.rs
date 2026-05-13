@@ -205,6 +205,17 @@ fn build_span_vf(vw: i32, vh: i32, w: i32, h: i32, x: i32, y: i32, fit: &str) ->
     format!("{canvas},crop={w}:{h}:{x}:{y}")
 }
 
+/// Translate the unified `side_fit` (crop / fit / stretch — same
+/// vocabulary as `span_fit`) into the swaybg `-m MODE` flag used for
+/// side images.
+fn side_swaybg_mode(cfg: &Config) -> String {
+    match cfg.side_fit.as_str() {
+        "fit" => "fit".into(),
+        "stretch" => "stretch".into(),
+        _ => "fill".into(),  // "crop" or unknown → fill (swaybg's scale-to-cover)
+    }
+}
+
 /// Compute the combined virtual canvas size and each output's offset within it.
 fn compute_canvas(group: &[&Output], dir: SpanDirection) -> ((i32, i32), Vec<(i32, i32)>) {
     let mut offsets = Vec::with_capacity(group.len());
@@ -290,7 +301,7 @@ pub fn plan(cfg: &Config, detected: &[Output]) -> Result<Vec<WorkerKind>> {
             MediaKind::Image => plan.push(WorkerKind::Swaybg {
                 output: out.clone(),
                 path: path.clone(),
-                mode: cfg.side_mode.clone(),
+                mode: side_swaybg_mode(cfg),
             }),
             MediaKind::Video => {
                 // Side video also gets an IPC socket so the tray can
@@ -305,7 +316,12 @@ pub fn plan(cfg: &Config, detected: &[Output]) -> Result<Vec<WorkerKind>> {
                     vf: None,
                     media: MediaKind::Video,
                     audio: false,
-                    fit: cfg.span_fit.clone(),
+                    // side_fit, NOT span_fit — these are independent settings.
+                    // The tray's "Side fit" menu sets this; the
+                    // panscan/keepaspect logic in spawn_mpv translates
+                    // crop/fit/stretch into mpv's vocabulary just like
+                    // it does for the span workers.
+                    fit: cfg.side_fit.clone(),
                     extra: cfg.extra_mpv_options.clone(),
                     ipc_socket,
                 });
