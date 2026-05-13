@@ -1,8 +1,4 @@
 // CLI surface: clap definitions and subcommand dispatch.
-//
-// Flag names use `span` / `side` semantics; old aliases (`--video`,
-// `--left-image`, `--image-output`, `--image-mode`) are kept so scripts and
-// muscle memory keep working.
 
 use crate::{config::Config, daemon, outputs};
 use anyhow::{Context, Result};
@@ -40,11 +36,11 @@ pub enum Cmd {
 #[derive(Args, Debug)]
 pub struct SetArgs {
     /// Content for the spanned monitor group. Image or video — auto-detected.
-    #[arg(long, visible_alias = "video", value_name = "PATH")]
+    #[arg(long, value_name = "PATH")]
     pub span: Option<PathBuf>,
 
     /// Content for the side monitor. Image or video — auto-detected.
-    #[arg(long, visible_aliases = ["left-image", "image"], value_name = "PATH")]
+    #[arg(long, value_name = "PATH")]
     pub side: Option<PathBuf>,
 
     /// Unmute video audio. Defaults to muted. Only relevant when --span is a video.
@@ -61,15 +57,15 @@ pub struct SetArgs {
     pub span_outputs: Option<Vec<String>>,
 
     /// Output name to display the side content on.
-    #[arg(long, visible_alias = "image-output", value_name = "NAME")]
+    #[arg(long, value_name = "NAME")]
     pub side_output: Option<String>,
 
     /// Fit mode for the side content when it's an image: fill | fit | stretch | center | tile.
-    #[arg(long, visible_alias = "image-mode", value_name = "MODE")]
+    #[arg(long, value_name = "MODE")]
     pub side_mode: Option<String>,
 
     /// Fit mode for the span content: crop | fit | stretch.
-    #[arg(long, visible_alias = "video-fit", value_name = "MODE")]
+    #[arg(long, value_name = "MODE")]
     pub span_fit: Option<String>,
 
     /// Don't reload the running daemon after writing config.

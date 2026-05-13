@@ -42,12 +42,9 @@ Options:
   --autostart=systemd|xdg|none   How to autostart on login (default: ask)
   --skip-pacman                  Don't try to install system packages
   --span PATH                    Pre-seed config: spanning media (image or video)
-                                 [aliases: --video]
   --side PATH                    Pre-seed config: side-monitor media (image or video)
-                                 [aliases: --left-image]
   --span-outputs CSV             Override span outputs (e.g. HDMI-A-4,DP-6)
   --side-output NAME             Override side output (e.g. DP-5)
-                                 [aliases: --image-output]
   --audio                        Unmute video
   --start                        Start the daemon at the end
   -h, --help                     This help
@@ -64,10 +61,10 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --autostart=*)      AUTOSTART_MODE="${1#*=}"; shift ;;
         --skip-pacman)      SKIP_PACMAN=1; shift ;;
-        --span|--video)            SPAN="$2"; shift 2 ;;
-        --side|--left-image)       SIDE="$2"; shift 2 ;;
+        --span)                    SPAN="$2"; shift 2 ;;
+        --side)                    SIDE="$2"; shift 2 ;;
         --span-outputs)            SPAN_OUTPUTS="$2"; shift 2 ;;
-        --side-output|--image-output) SIDE_OUTPUT="$2"; shift 2 ;;
+        --side-output)             SIDE_OUTPUT="$2"; shift 2 ;;
         --audio)            AUDIO=1; shift ;;
         --start)            START_NOW=1; shift ;;
         -h|--help)          usage; exit 0 ;;

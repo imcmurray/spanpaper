@@ -1,9 +1,5 @@
 // Persistent config at $XDG_CONFIG_HOME/spanpaper/config.toml
 // (typically ~/.config/spanpaper/config.toml).
-//
-// Field names use `span` / `side` semantics now; older configs that wrote
-// `video` / `left_image` / `image_output` / `image_mode` / `video_fit` are
-// still accepted via serde aliases and silently migrated on next save.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -17,11 +13,11 @@ use crate::media::MediaKind;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     /// Content for the span outputs. Image or video — auto-detected.
-    #[serde(default, alias = "video")]
+    #[serde(default)]
     pub span: Option<PathBuf>,
 
     /// Content for the side output (DP-5 by default). Image or video.
-    #[serde(default, alias = "left_image")]
+    #[serde(default)]
     pub side: Option<PathBuf>,
 
     /// Unmute the video. Only meaningful when `span` is a video. Default: muted.
@@ -34,12 +30,12 @@ pub struct Config {
     pub span_outputs: Vec<String>,
 
     /// Output that gets the side content.
-    #[serde(default = "default_side_output", alias = "image_output")]
+    #[serde(default = "default_side_output")]
     pub side_output: Option<String>,
 
     /// Fit mode for the side content when it's an image (passed to swaybg).
     /// Values: fill | fit | stretch | center | tile.
-    #[serde(default = "default_side_mode", alias = "image_mode")]
+    #[serde(default = "default_side_mode")]
     pub side_mode: String,
 
     /// Direction of the span. "vertical" = top/bottom (default);
@@ -51,11 +47,12 @@ pub struct Config {
     #[serde(default)]
     pub extra_mpv_options: Vec<String>,
 
-    /// How aggressively to fit the (already-cropped) slice to its monitor.
-    /// `crop`   = panscan=1.0, zoom-fill, may clip sides (recommended)
-    /// `fit`    = letterbox, may show black bars
-    /// `stretch`= ignore aspect (--keepaspect=no)
-    #[serde(default = "default_span_fit", alias = "video_fit")]
+    /// How aggressively to fit the source onto the combined span canvas
+    /// before per-monitor slicing.
+    ///   `crop`    = scale-to-cover + center-crop (default, fills both monitors)
+    ///   `fit`     = scale-to-contain + letterbox/pillarbox
+    ///   `stretch` = ignore aspect, stretch to canvas dimensions
+    #[serde(default = "default_span_fit")]
     pub span_fit: String,
 }
 

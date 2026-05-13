@@ -26,7 +26,7 @@ daemon, which rolls the workers in place — no restart needed.
 
 The combined span area is **1920 × 2160** (two stacked 1920×1080 panels).
 Ideal source is a single MP4 at that resolution. Anything else gets cropped
-or letterboxed per the `video_fit` setting in
+or letterboxed per the `span_fit` setting in
 `~/.config/spanpaper/config.toml` (`crop` = zoom-fill, default; `fit` =
 letterbox; `stretch` = ignore aspect).
 

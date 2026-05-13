@@ -45,10 +45,6 @@ right backend is chosen for you:
 | Video (`.mp4`, `.mkv`, `.webm`, …) | mpvpaper × N, top/bottom crop | mpvpaper × 1, no crop |
 | Image (`.jpg`, `.png`, `.webp`, …) | mpvpaper × N, held as still frame, top/bottom crop | swaybg (lighter than libmpv for a still) |
 
-Old `--video` / `--left-image` flags and old config field names (`video`,
-`left_image`, `image_output`, `image_mode`, `video_fit`) are still
-accepted as aliases and silently migrated on the next save.
-
 `setup.sh --help` lists every flag. The sections below explain what it
 automates.
 

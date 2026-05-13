@@ -166,7 +166,7 @@ fn supervisor_loop() -> Result<()> {
 
 fn start_workers() -> Result<Vec<Worker>> {
     let cfg = Config::load()
-        .context("load config (run `spanpaper set --video PATH ...` first)")?;
+        .context("load config (run `spanpaper set --span PATH ...` first)")?;
     cfg.validate()?;
 
     let detected = outputs::detect().unwrap_or_default();
