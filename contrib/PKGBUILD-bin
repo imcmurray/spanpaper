@@ -1,0 +1,51 @@
+# Maintainer: Ian McMurray <ian.mcmurray@gmail.com>
+#
+# Binary AUR template for `spanpaper-bin`. Pulls a prebuilt x86_64 tarball
+# from the GitHub release rather than rebuilding from source — install in
+# seconds, no Rust toolchain required.
+#
+# Build/install locally:
+#   cd contrib && makepkg -p PKGBUILD-bin -si
+#
+# AUR submission workflow (maintainer-only):
+#   1. Build + upload the release tarball to GitHub:
+#        gh release upload v$pkgver \
+#            dist/spanpaper-$pkgver-x86_64.tar.gz --clobber
+#   2. Bump `pkgver`, reset `pkgrel=1`
+#   3. Run: updpkgsums -p PKGBUILD-bin
+#        (or: sha256sum dist/spanpaper-$pkgver-x86_64.tar.gz)
+#   4. Run: makepkg -p PKGBUILD-bin --printsrcinfo > .SRCINFO
+#   5. Commit + push to ssh://aur@aur.archlinux.org/spanpaper-bin.git
+
+pkgname=spanpaper-bin
+_pkgname=spanpaper
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="Wayland wallpaper daemon that spans one image or video across stacked monitors (prebuilt binary)"
+arch=('x86_64')
+url="https://github.com/imcmurray/spanpaper"
+license=('MIT')
+depends=('mpvpaper' 'swaybg')
+provides=("$_pkgname=$pkgver")
+conflicts=("$_pkgname")
+source=("$_pkgname-$pkgver-x86_64.tar.gz::$url/releases/download/v$pkgver/$_pkgname-$pkgver-x86_64.tar.gz")
+sha256sums=('SKIP')   # replaced by `updpkgsums -p PKGBUILD-bin` before AUR push
+
+package() {
+    cd "$_pkgname-$pkgver-x86_64"
+
+    install -Dm755 spanpaper "$pkgdir/usr/bin/spanpaper"
+
+    install -d "$pkgdir/usr/lib/systemd/user"
+    sed "s|@SPANPAPER_BIN@|/usr/bin/spanpaper|g" contrib/spanpaper.service \
+        > "$pkgdir/usr/lib/systemd/user/spanpaper.service"
+    chmod 644 "$pkgdir/usr/lib/systemd/user/spanpaper.service"
+
+    install -d "$pkgdir/usr/share/spanpaper/autostart"
+    sed "s|@SPANPAPER_BIN@|/usr/bin/spanpaper|g" contrib/spanpaper.desktop \
+        > "$pkgdir/usr/share/spanpaper/autostart/spanpaper.desktop"
+    chmod 644 "$pkgdir/usr/share/spanpaper/autostart/spanpaper.desktop"
+
+    install -Dm644 README.md "$pkgdir/usr/share/doc/$_pkgname/README.md"
+    install -Dm644 LICENSE   "$pkgdir/usr/share/licenses/$_pkgname/LICENSE"
+}
