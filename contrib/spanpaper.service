@@ -1,0 +1,16 @@
+[Unit]
+Description=spanpaper — spanning video wallpaper for Wayland
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/spanpaper start
+Restart=on-failure
+RestartSec=2
+
+# Don't try to start before the Wayland session is up.
+ConditionEnvironment=WAYLAND_DISPLAY
+
+[Install]
+WantedBy=graphical-session.target

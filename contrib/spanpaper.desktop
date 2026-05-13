@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=spanpaper
+Comment=Spanning video wallpaper for Wayland
+Exec=spanpaper start --background
+Terminal=false
+Categories=Utility;
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
