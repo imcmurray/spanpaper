@@ -27,7 +27,7 @@ required-features = ["tray"]
 
 [features]
 default = []
-tray    = ["dep:ksni", "dep:tokio", "dep:gtk4", "dep:async-channel"]
+tray    = ["dep:ksni", "dep:tokio", "dep:gtk4", "dep:async-channel", "dep:gtk4-layer-shell"]
 
 [dependencies]
 clap          = { version = "4.5", features = ["derive"] }
@@ -45,10 +45,15 @@ shellexpand   = "3"
 which         = "6"
 
 # Tray-only deps.
-ksni          = { version = "0.3", optional = true }
-tokio         = { version = "1",   optional = true, features = ["rt", "macros", "time", "signal"] }
-gtk4          = { version = "0.9", optional = true, features = ["v4_10"] }
-async-channel = { version = "2",   optional = true }
+ksni              = { version = "0.3", optional = true }
+tokio             = { version = "1",   optional = true, features = ["rt", "macros", "time", "signal"] }
+gtk4              = { version = "0.9", optional = true, features = ["v4_10"] }
+async-channel     = { version = "2",   optional = true }
+# Wraps gtk-layer-shell; lets the palette anchor itself near the tray
+# icon via the wlr-layer-shell protocol the daemon already uses. Wlroots
+# compositors only (Budgie wlroots, Sway, Hyprland, Wayfire, KDE on
+# Wayland — i.e. every compositor spanpaper supports).
+gtk4-layer-shell  = { version = "0.5", optional = true }
 
 [profile.release]
 lto           = "thin"

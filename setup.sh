@@ -20,8 +20,11 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_SRC="$REPO_DIR/target/release/spanpaper"
 BIN_DST="$HOME/.local/bin/spanpaper"
+TRAY_SRC="$REPO_DIR/target/release/spanpaper-tray"
+TRAY_DST="$HOME/.local/bin/spanpaper-tray"
 SYSTEMD_DST="$HOME/.config/systemd/user/spanpaper.service"
 AUTOSTART_DST="$HOME/.config/autostart/spanpaper.desktop"
+TRAY_AUTOSTART_DST="$HOME/.config/autostart/spanpaper-tray.desktop"
 APPS_DIR="$HOME/.local/share/applications"
 OPENWITH_SPAN_DST="$APPS_DIR/spanpaper-set-span.desktop"
 OPENWITH_SIDE_DST="$APPS_DIR/spanpaper-set-side.desktop"
@@ -30,6 +33,7 @@ OPENWITH_SIDE_DST="$APPS_DIR/spanpaper-set-side.desktop"
 
 AUTOSTART_MODE="ask"   # ask | systemd | xdg | none
 SKIP_PACMAN=0
+WITH_TRAY=0
 SPAN=""
 SIDE=""
 SPAN_OUTPUTS=""
@@ -44,6 +48,9 @@ Usage: $0 [options]
 Options:
   --autostart=systemd|xdg|none   How to autostart on login (default: ask)
   --skip-pacman                  Don't try to install system packages
+  --with-tray                    Also build + install the spanpaper-tray applet
+                                 (panel icon + drag-and-drop layout palette).
+                                 Pulls GTK4 / ksni / tokio at build time.
   --span PATH                    Pre-seed config: spanning media (image or video)
   --side PATH                    Pre-seed config: side-monitor media (image or video)
   --span-outputs CSV             Override span outputs (e.g. HDMI-A-4,DP-6)
@@ -55,6 +62,7 @@ Options:
 Examples:
   $0                                              # interactive
   $0 --autostart=systemd --start                  # install + enable + start
+  $0 --with-tray --autostart=xdg --start          # full install incl. tray applet
   $0 --span ~/wall.mp4 --side ~/side.jpg \\
      --autostart=systemd --start                  # full setup in one shot
 EOF
@@ -64,6 +72,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --autostart=*)      AUTOSTART_MODE="${1#*=}"; shift ;;
         --skip-pacman)      SKIP_PACMAN=1; shift ;;
+        --with-tray)        WITH_TRAY=1; shift ;;
         --span)                    SPAN="$2"; shift 2 ;;
         --side)                    SIDE="$2"; shift 2 ;;
         --span-outputs)            SPAN_OUTPUTS="$2"; shift 2 ;;
@@ -155,9 +164,17 @@ ok "$(cargo --version)"
 
 # ---- 4. Build ----------------------------------------------------------------
 
-step "Building spanpaper (release)"
-cd "$REPO_DIR"
-cargo build --release
+if (( WITH_TRAY )); then
+    step "Building spanpaper + spanpaper-tray (release, --features tray)"
+    cd "$REPO_DIR"
+    cargo build --release --features tray
+    [[ -x "$TRAY_SRC" ]] || { err "build succeeded but $TRAY_SRC missing"; exit 1; }
+    ok "built $TRAY_SRC ($(du -h "$TRAY_SRC" | cut -f1))"
+else
+    step "Building spanpaper (release)"
+    cd "$REPO_DIR"
+    cargo build --release
+fi
 [[ -x "$BIN_SRC" ]] || { err "build succeeded but $BIN_SRC missing"; exit 1; }
 ok "built $BIN_SRC ($(du -h "$BIN_SRC" | cut -f1))"
 
@@ -166,6 +183,10 @@ ok "built $BIN_SRC ($(du -h "$BIN_SRC" | cut -f1))"
 step "Installing binary"
 install -Dm755 "$BIN_SRC" "$BIN_DST"
 ok "installed -> $BIN_DST"
+if (( WITH_TRAY )); then
+    install -Dm755 "$TRAY_SRC" "$TRAY_DST"
+    ok "installed -> $TRAY_DST"
+fi
 
 # ---- 5b. "Open With" entries -------------------------------------------------
 # Two MimeType-only .desktop files that let file managers offer
@@ -329,6 +350,18 @@ case "$AUTOSTART_MODE" in
         warn "unknown --autostart mode: $AUTOSTART_MODE (skipping)"
         ;;
 esac
+
+# ---- 8b. Tray autostart (when --with-tray) ----------------------------------
+
+if (( WITH_TRAY )); then
+    step "Installing tray applet autostart entry"
+    install -Dm644 /dev/null "$TRAY_AUTOSTART_DST"
+    sed "s|@SPANPAPER_TRAY_BIN@|$TRAY_DST|g" \
+        "$REPO_DIR/contrib/spanpaper-tray.desktop" > "$TRAY_AUTOSTART_DST"
+    chmod 644 "$TRAY_AUTOSTART_DST"
+    ok "installed $TRAY_AUTOSTART_DST"
+    ok "tray will auto-launch on next login; run \`spanpaper-tray &\` once to try it now"
+fi
 
 # ---- 9. Detected outputs (sanity check) --------------------------------------
 

@@ -33,7 +33,12 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 /// Messages from the tokio/ksni thread to the GTK main thread.
 #[derive(Debug)]
 enum UiMsg {
-    ShowPalette,
+    /// Open (or raise) the layout palette. `x` and `y` are the screen
+    /// coordinates of the tray-icon click, used by gtk-layer-shell to
+    /// anchor the popover near the icon. (-1, -1) means "no position
+    /// hint" — happens for menu-item activations and on panels that
+    /// don't pass coords through to SNI.
+    ShowPalette { x: i32, y: i32 },
 }
 
 #[derive(Debug)]
@@ -61,8 +66,15 @@ impl Tray for SpanpaperTray {
     }
 
     fn icon_name(&self) -> String {
-        // Matches Icon= in contrib/spanpaper-set-*.desktop.
-        "preferences-desktop-wallpaper".into()
+        // Reflect daemon + playback state in the panel icon. Returns
+        // the highest-priority match; all three names are standard
+        // freedesktop icon-naming-spec entries present in any modern
+        // icon theme.
+        match (self.daemon_running, self.paused) {
+            (false, _)   => "media-playback-stop".into(),
+            (true, true) => "media-playback-pause".into(),
+            (true, false) => "preferences-desktop-wallpaper".into(),
+        }
     }
 
     fn tool_tip(&self) -> ToolTip {
@@ -78,10 +90,11 @@ impl Tray for SpanpaperTray {
         }
     }
 
-    /// Left-click handler. Request the GTK thread to open the palette.
-    fn activate(&mut self, _x: i32, _y: i32) {
-        tracing::debug!("tray activate (left-click)");
-        if let Err(e) = self.ui_tx.try_send(UiMsg::ShowPalette) {
+    /// Left-click handler. Request the GTK thread to open the palette
+    /// at the icon's screen coordinates.
+    fn activate(&mut self, x: i32, y: i32) {
+        tracing::debug!("tray activate (left-click) at ({x},{y})");
+        if let Err(e) = self.ui_tx.try_send(UiMsg::ShowPalette { x, y }) {
             tracing::warn!("send ShowPalette: {e}");
         }
     }
@@ -107,7 +120,10 @@ impl Tray for SpanpaperTray {
                     label: "Open palette".into(),
                     icon_name: "preferences-desktop-wallpaper".into(),
                     activate: Box::new(move |_| {
-                        let _ = tx.try_send(UiMsg::ShowPalette);
+                        // No click coords for menu-item activation —
+                        // let palette::show fall back to compositor
+                        // default placement.
+                        let _ = tx.try_send(UiMsg::ShowPalette { x: -1, y: -1 });
                     }),
                     ..Default::default()
                 }
@@ -361,7 +377,7 @@ fn main() -> Result<()> {
                 tracing::debug!("ui msg received: {msg:?}");
                 let Some(app) = app_w.upgrade() else { break };
                 match msg {
-                    UiMsg::ShowPalette => palette::show(&app),
+                    UiMsg::ShowPalette { x, y } => palette::show(&app, x, y),
                 }
             }
             tracing::debug!("ui receiver loop ended");

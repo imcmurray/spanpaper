@@ -246,6 +246,47 @@ journalctl --user -u spanpaper -f       # live logs
 
 **C. Budgie Menu → Startup Applications** → command `spanpaper start --background`.
 
+## Tray applet (optional)
+
+A second, optional binary — `spanpaper-tray` — adds a panel
+StatusNotifierItem with a layout palette. Left-click the icon to open
+a small window that draws your monitor topology to scale; each output
+shows a thumbnail of its current content, and you can:
+
+* **Drag any image/video** from your file manager onto a rectangle to
+  assign it.
+* Click **Change…** for a portal-backed file picker (works in any
+  session that has `xdg-desktop-portal` — every modern desktop).
+* Right-click the panel icon for span-fit / side-fit / audio /
+  pause-resume / open-config-folder / reload-config.
+
+The icon updates state: full-colour wallpaper glyph when the daemon is
+running, pause glyph when paused, stop glyph when the daemon is down.
+Closing the palette (clicking outside, or the X) only closes the
+window — the tray keeps running in the panel.
+
+The tray is **feature-gated** (`cargo build --features tray`) so the
+default daemon build stays GTK-free. To install it via `setup.sh`:
+
+```bash
+./setup.sh --with-tray --autostart=xdg --start
+```
+
+That builds both binaries, installs the autostart entry
+(`~/.config/autostart/spanpaper-tray.desktop`), and starts the
+daemon. Launch the tray once by hand to see it now:
+
+```bash
+spanpaper-tray &
+```
+
+The pacman packages currently ship the daemon only. If you want the
+tray on Arch, use the source-install path above.
+
+> **GNOME note**: tray icons need an AppIndicator extension on GNOME
+> Shell (built in on Budgie, KDE Plasma, Cinnamon, MATE; waybar
+> renders them natively on Sway/Hyprland).
+
 ## CLI cheatsheet
 
 ```bash
@@ -362,21 +403,32 @@ spanpaper/
 ├── setup.sh                   one-shot installer (source build path)
 ├── release.sh                 cut a new tagged release end-to-end
 ├── gen-test-assets.sh         span-continuity calibration generator
+├── docs/
+│   └── tray-applet-plan.md    design + milestone notes for the tray binary
 ├── contrib/
-│   ├── spanpaper.service      systemd --user unit (uses @SPANPAPER_BIN@)
-│   ├── spanpaper.desktop      XDG autostart entry (uses @SPANPAPER_BIN@)
-│   ├── PKGBUILD               source-build pacman package recipe
-│   └── PKGBUILD-bin           prebuilt-binary pacman package recipe
+│   ├── spanpaper.service                systemd --user unit (uses @SPANPAPER_BIN@)
+│   ├── spanpaper.desktop                XDG autostart entry (uses @SPANPAPER_BIN@)
+│   ├── spanpaper-set-{span,side}.desktop  right-click "Open With" entries
+│   ├── spanpaper-tray.desktop           tray autostart entry (uses @SPANPAPER_TRAY_BIN@)
+│   ├── PKGBUILD                         source-build pacman package recipe
+│   └── PKGBUILD-bin                     prebuilt-binary pacman package recipe
 ├── dist/                      (generated; gitignored — release artifacts)
 ├── test-assets/               (generated; gitignored)
 └── src/
-    ├── main.rs                tracing init + CLI dispatch
+    ├── main.rs                tracing init + CLI dispatch (daemon)
     ├── cli.rs                 clap definitions
     ├── config.rs              TOML load/save (atomic write)
     ├── media.rs               image-vs-video content-type detection
     ├── outputs.rs             wl_output + xdg-output enumeration
     ├── workers.rs             mpvpaper / swaybg subprocess plan & supervisors
-    └── daemon.rs              pid file, signal handling, supervisor loop
+    ├── ipc.rs                 mpv JSON IPC client for span sync + pause/resume
+    ├── daemon.rs              pid file, signal handling, supervisor loop
+    └── bin/spanpaper-tray/    optional tray applet (feature = "tray")
+        ├── main.rs            tokio + ksni service, GTK4 application
+        ├── daemon_client.rs   CLI/IPC client of the daemon
+        ├── outputs_query.rs   `spanpaper outputs` parser
+        ├── palette.rs         layout-palette popover window
+        └── thumbnail.rs       ffmpeg-backed thumbnail cache
 ```
 
 ## License

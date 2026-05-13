@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=spanpaper tray
+Comment=Tray applet for spanpaper — StatusNotifierItem with layout palette
+# IMPORTANT: setup.sh substitutes @SPANPAPER_TRAY_BIN@ with the real
+# path. Session autostart runs with PATH=/usr/local/bin:/usr/bin:/bin
+# (no ~/.local/bin), so the Exec= field MUST be an absolute path.
+Exec=@SPANPAPER_TRAY_BIN@
+Icon=preferences-desktop-wallpaper
+Terminal=false
+Categories=Utility;
+X-GNOME-Autostart-enabled=true
+NoDisplay=true

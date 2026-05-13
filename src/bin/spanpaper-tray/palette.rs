@@ -14,6 +14,7 @@ use crate::{
     thumbnail,
 };
 use gtk4::prelude::*;
+use gtk4_layer_shell::LayerShell;
 use serde::Deserialize;
 use std::path::Path;
 
@@ -50,7 +51,23 @@ const MAX_EDGE_PX: i32 = 220;
 /// the existing instance instead of stacking up duplicates.
 const PALETTE_WIDGET_NAME: &str = "spanpaper-palette";
 
-pub fn show(app: &gtk4::Application) {
+/// Shared state per palette window. Lives in a Rc because both the
+/// focus-out handler and the file-picker callbacks need to read/write
+/// the auto-close suppression flag.
+#[derive(Default)]
+struct PaletteState {
+    /// Set true once the window has gained focus at least once. Stops
+    /// us auto-closing on the very-first-open transition (which goes
+    /// from "not yet active" → "active").
+    was_active: std::cell::Cell<bool>,
+    /// Set true while a modal child (the FileDialog) is open. When
+    /// that happens GTK4 reports the parent window as inactive even
+    /// though the user hasn't actually clicked away — we must not
+    /// close in that case or we destroy the dialog's parent mid-pick.
+    suppress_autoclose: std::cell::Cell<bool>,
+}
+
+pub fn show(app: &gtk4::Application, click_x: i32, click_y: i32) {
     // Single-instance: if a palette window is already open, raise and
     // focus it instead of spawning a second one. Drop handlers
     // repopulate-in-place rather than closing, so this path catches
@@ -63,15 +80,110 @@ pub fn show(app: &gtk4::Application) {
         }
     }
 
+    // Pick a default size that comfortably fits the full layout
+    // (monitor rectangles + summary rows + drop-hint label) so the
+    // initial paint doesn't collapse around the small async-thumbnail
+    // spinners. Allow resizing so the user can grow it if their theme
+    // demands more headroom — the layout still looks reasonable at
+    // larger sizes.
     let window = gtk4::ApplicationWindow::builder()
         .application(app)
         .title("spanpaper")
-        .resizable(false)
-        .default_width(480)
+        .default_width(540)
+        .default_height(540)
         .build();
     window.set_widget_name(PALETTE_WIDGET_NAME);
+
+    // Anchor the palette near the tray icon via wlr-layer-shell.
+    // Layer shell lets us place a regular Wayland window at exact
+    // screen coordinates — without it the compositor picks
+    // (usually badly, sometimes off-screen for tiny defaults). We
+    // anchor to top-left and use margins as the (x, y) offset from
+    // the screen origin, which is where SNI's Activate(x, y) hands
+    // us the tray-icon's click position.
+    //
+    // Fallback: when coords are (-1, -1) — menu-item activation,
+    // panels that don't pass coords — let the compositor pick.
+    // Likewise if layer-shell isn't supported on this compositor.
+    if click_x >= 0 && click_y >= 0 {
+        anchor_near_tray(&window, click_x, click_y);
+    }
+
+    // Per-window state. Attached as glib qdata so other functions
+    // (notably the file-picker code in summary_row) can find it via
+    // the window reference without us threading the Rc through five
+    // build_* functions.
+    let state = std::rc::Rc::new(PaletteState::default());
+    unsafe {
+        window.set_data::<std::rc::Rc<PaletteState>>(STATE_QDATA, state.clone());
+    }
+
+    // Auto-close on focus loss — matches how panel applets like
+    // Caffeine / Night Light behave. is_active flips false when
+    // another window grabs focus; on Wayland that's also the "user
+    // clicked away" signal. Two gates keep this honest:
+    //   * was_active prevents closing during the initial show, when
+    //     is_active starts false and only flips true once the
+    //     compositor focuses us.
+    //   * suppress_autoclose covers the modal-child case (FileDialog
+    //     open) — the palette becomes "inactive" because its dialog
+    //     is focused, but closing here would tear down the dialog's
+    //     parent mid-pick.
+    let state_for_focus = state.clone();
+    window.connect_is_active_notify(move |w| {
+        if w.is_active() {
+            state_for_focus.was_active.set(true);
+        } else if state_for_focus.was_active.get()
+            && !state_for_focus.suppress_autoclose.get()
+        {
+            w.close();
+        }
+    });
+
     populate(&window);
     window.present();
+}
+
+fn anchor_near_tray(window: &gtk4::ApplicationWindow, x: i32, y: i32) {
+    use gtk4_layer_shell::{Edge, Layer};
+
+    // Init the surface as a layer-shell surface. Must happen before
+    // present(). If the compositor doesn't speak wlr-layer-shell this
+    // call is harmless — we just won't get anchor behaviour.
+    window.init_layer_shell();
+    window.set_layer(Layer::Top);
+
+    // Anchor to top-left and use margins to place the window's
+    // top-left corner near the icon. We deliberately don't anchor
+    // to two opposite edges (which would *stretch* the window) —
+    // just top + left so margins act as an absolute position.
+    window.set_anchor(Edge::Top, true);
+    window.set_anchor(Edge::Left, true);
+    // Clamp to >= 0 so a screen-edge click can't push us negative.
+    // Inset by a few pixels so the palette doesn't share an edge with
+    // the panel — easier to see and to click outside to dismiss.
+    window.set_margin(Edge::Top, y.max(0).saturating_add(4));
+    window.set_margin(Edge::Left, x.max(0).saturating_add(4));
+
+    // Take keyboard focus when the window is interacted with so the
+    // file-picker (and any future text input inside the popover)
+    // works. OnDemand grabs focus while the user types/clicks but
+    // releases when they click elsewhere — which dovetails with our
+    // focus-out auto-close.
+    window.set_keyboard_mode(gtk4_layer_shell::KeyboardMode::OnDemand);
+}
+
+/// Glib qdata key used to stash the per-window PaletteState. Same
+/// convention as `widget_name` for finding windows: stringly typed,
+/// stable, internal.
+const STATE_QDATA: &str = "spanpaper-palette-state";
+
+fn palette_state(window: &gtk4::ApplicationWindow) -> Option<std::rc::Rc<PaletteState>> {
+    unsafe {
+        window
+            .data::<std::rc::Rc<PaletteState>>(STATE_QDATA)
+            .map(|ptr| (*ptr.as_ref()).clone())
+    }
 }
 
 /// (Re)build the palette window's child from current config + outputs.
@@ -214,11 +326,21 @@ fn build_output_frame(
     let w = ((out.width as f32) * scale).round().max(40.0) as i32;
     let h = ((out.height as f32) * scale).round().max(40.0) as i32;
 
+    let assigned_text = match assigned {
+        Some(p) => basename(Path::new(p)),
+        None => "(unset)".into(),
+    };
     let frame = gtk4::Frame::builder()
         .label(&format!("{}  ({})", out.name, role))
         .label_xalign(0.5)
         .width_request(w)
         .height_request(h)
+        // Hover/screen-reader text: full output info + current file +
+        // hint that this is a drop target.
+        .tooltip_text(&format!(
+            "{} ({}×{})\nCurrently: {}\nDrop an image or video here to assign it to the {} slot.",
+            out.name, out.width, out.height, assigned_text, role,
+        ))
         .build();
 
     // Drop target: accept any gio::File (local files) dropped onto
@@ -280,42 +402,69 @@ fn build_output_frame(
         .margin_end(4)
         .build();
 
-    // Try the thumbnail first; on any failure fall back to a
-    // resolution-text placeholder so the popover always renders.
-    let picture_packed = match assigned {
-        Some(p) => match thumbnail::ensure(Path::new(p)) {
-            Ok(thumb) => {
-                let pic = gtk4::Picture::for_filename(&thumb);
-                pic.set_can_shrink(true);
-                pic.set_content_fit(gtk4::ContentFit::Cover);
-                pic.set_hexpand(true);
-                pic.set_vexpand(true);
-                inner.append(&pic);
-                true
-            }
-            Err(e) => {
-                tracing::warn!("thumbnail for {p}: {e:#}");
-                false
-            }
-        },
-        None => false,
-    };
-    if !picture_packed {
-        let res = gtk4::Label::builder()
-            .label(&format!("{}×{}", out.width, out.height))
-            .css_classes(vec!["dim-label"])
-            .vexpand(true)
+    // Wrap the thumbnail area in its own Box so we can swap its
+    // child once `thumbnail::ensure` (which shells to ffmpeg) finishes
+    // off the main thread. First paint shows a spinner; the actual
+    // thumbnail replaces it lazily so opening the palette never
+    // blocks on ffmpeg.
+    let thumb_area = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Vertical)
+        .hexpand(true)
+        .vexpand(true)
+        .halign(gtk4::Align::Fill)
+        .valign(gtk4::Align::Fill)
+        .build();
+    inner.append(&thumb_area);
+
+    let res_text = format!("{}×{}", out.width, out.height);
+    if let Some(p) = assigned {
+        let spinner = gtk4::Spinner::builder()
+            .spinning(true)
+            .halign(gtk4::Align::Center)
             .valign(gtk4::Align::Center)
             .build();
-        inner.append(&res);
+        thumb_area.append(&spinner);
+
+        let path = std::path::PathBuf::from(p);
+        let thumb_area_w = thumb_area.downgrade();
+        let fallback_text = res_text.clone();
+        gtk4::glib::spawn_future_local(async move {
+            // spawn_blocking runs ffmpeg on glib's worker thread pool;
+            // its future resolves back on the GTK main loop where it's
+            // safe to mutate widgets.
+            let result = gtk4::gio::spawn_blocking(move || thumbnail::ensure(&path)).await;
+            let Some(thumb_area) = thumb_area_w.upgrade() else { return };
+            // Drop the spinner.
+            while let Some(child) = thumb_area.first_child() {
+                thumb_area.remove(&child);
+            }
+            match result {
+                Ok(Ok(thumb_path)) => {
+                    let pic = gtk4::Picture::for_filename(&thumb_path);
+                    pic.set_can_shrink(true);
+                    pic.set_content_fit(gtk4::ContentFit::Cover);
+                    pic.set_hexpand(true);
+                    pic.set_vexpand(true);
+                    thumb_area.append(&pic);
+                }
+                Ok(Err(e)) => {
+                    tracing::warn!("thumbnail: {e:#}");
+                    thumb_area.append(&fallback_label(&fallback_text));
+                }
+                Err(e) => {
+                    tracing::warn!("thumbnail worker panicked: {e:?}");
+                    thumb_area.append(&fallback_label(&fallback_text));
+                }
+            }
+        });
+    } else {
+        // No assignment — show the resolution placeholder immediately;
+        // no spinner because there's nothing to load.
+        thumb_area.append(&fallback_label(&res_text));
     }
 
-    let file_label = match assigned {
-        Some(p) => basename(Path::new(p)),
-        None => "(unset)".into(),
-    };
     let file = gtk4::Label::builder()
-        .label(&file_label)
+        .label(&assigned_text)
         .ellipsize(gtk4::pango::EllipsizeMode::Middle)
         .max_width_chars(18)
         .halign(gtk4::Align::Center)
@@ -351,7 +500,9 @@ fn summary_row(role: &str, slot: Slot, path: Option<&str>) -> gtk4::Box {
     // a drop: set the slot, populate the window in place.
     let change = gtk4::Button::builder()
         .label("Change…")
-        .tooltip_text("Pick an image or video to assign to this slot")
+        .tooltip_text(&format!(
+            "Open a file picker to assign a new image or video to the {role} slot"
+        ))
         .build();
     change.connect_clicked(move |btn| {
         open_file_picker_for(btn, slot);
@@ -394,12 +545,32 @@ fn open_file_picker_for(button: &gtk4::Button, slot: Slot) {
     dialog.set_filters(Some(&filters));
     dialog.set_default_filter(Some(&filter));
 
+    // Suppress focus-out auto-close while the modal picker is open —
+    // the palette window will report itself as inactive (its modal
+    // child has focus), but we must not close, or we'd destroy the
+    // dialog's parent mid-pick.
+    let state = window.as_ref().and_then(palette_state);
+    if let Some(s) = &state {
+        s.suppress_autoclose.set(true);
+    }
+
     // FileDialog::open_future returns a glib future. spawn_future_local
     // runs it on the GTK main loop — no tokio runtime needed on this
     // thread.
     let window_for_set = window.clone();
+    let state_for_finish = state.clone();
     gtk4::glib::spawn_future_local(async move {
-        match dialog.open_future(window.as_ref()).await {
+        let result = dialog.open_future(window_for_set.as_ref()).await;
+
+        // Clear suppression before any further work — once we get here
+        // the modal dialog is gone and the palette is the front window
+        // again. (Strictly, we should clear AFTER populate() too, but
+        // populate is sync and the focus signal can't fire mid-call.)
+        if let Some(s) = state_for_finish {
+            s.suppress_autoclose.set(false);
+        }
+
+        match result {
             Ok(file) => {
                 let Some(path) = file.path() else {
                     tracing::warn!("file picker returned non-local file");
@@ -425,6 +596,15 @@ fn open_file_picker_for(button: &gtk4::Button, slot: Slot) {
             }
         }
     });
+}
+
+fn fallback_label(text: &str) -> gtk4::Label {
+    gtk4::Label::builder()
+        .label(text)
+        .css_classes(vec!["dim-label"])
+        .vexpand(true)
+        .valign(gtk4::Align::Center)
+        .build()
 }
 
 fn basename(p: &Path) -> String {

@@ -487,8 +487,58 @@ them is "do everything else first."
      when the daemon is stopped.
 7. **M7 — Polish.** Icon states (playing/paused/error), focus-out
    auto-close, accessibility labels, autostart `.desktop`,
-   documentation pass. **~½ day.** *In-place palette refresh after
-   drop pulled forward — landed independently, see commit below.*
+   documentation pass. **~½ day.** ✅ Done.
+   * In-place palette refresh after drop landed earlier as its own
+     commit; the rest landed together as the M7 polish commit.
+   * **Icon states.** `Tray::icon_name` now returns one of three
+     fdo icons based on `daemon_running × paused`:
+     `preferences-desktop-wallpaper` (running), `media-playback-pause`
+     (paused), `media-playback-stop` (stopped). Verified live via
+     dbus property reads.
+   * **Focus-out auto-close.** Palette window connects
+     `is_active_notify`; when the user clicks outside the window,
+     it closes. A shared `Rc<PaletteState>` carries a
+     `suppress_autoclose` flag the file-picker code flips while the
+     modal `FileDialog` is up — without that we'd close the dialog's
+     own parent mid-pick.
+   * **Async thumbnails.** `thumbnail::ensure` now runs through
+     `gio::spawn_blocking`, which runs ffmpeg on glib's worker thread
+     pool and resolves on the GTK main loop. Each frame paints a
+     `gtk4::Spinner` immediately and swaps in the picture (or a
+     resolution-text fallback) when ffmpeg returns. First-open of
+     the palette no longer blocks on ffmpeg.
+   * **Accessibility / tooltips.** Each output frame's tooltip
+     names the output, resolution, current file, and the drop role.
+     "Change…" buttons have tooltips explaining the picker action.
+     Bonus: removed a small duplication where the basename was
+     formatted twice.
+   * **Tray autostart.** New `contrib/spanpaper-tray.desktop`
+     (`@SPANPAPER_TRAY_BIN@` placeholder, mirrors the existing
+     `spanpaper.desktop`). `setup.sh` gained `--with-tray`: builds
+     with `--features tray`, installs `spanpaper-tray` to
+     `~/.local/bin`, and writes the autostart entry to
+     `~/.config/autostart/`.
+   * **Default size + resizable.** Palette window now opens 540×540
+     and resizable (was 480 wide, no height, fixed). Without an
+     explicit height the async-thumbnail spinners gave too small a
+     natural size and content was clipped on first paint.
+   * **Layer-shell anchoring near the tray icon.** With a plain
+     `gtk4::ApplicationWindow`, Wayland compositors place the
+     popover wherever they see fit — sometimes bottom-left, often
+     far from the panel icon. spanpaper already requires
+     `wlr-layer-shell` for the daemon's wallpapers, so the tray
+     now also uses it (via `gtk4-layer-shell = "0.5"` paired with
+     `gtk4 = "0.9"`): on `Tray::activate(x, y)` the click
+     coordinates ride along on `UiMsg::ShowPalette { x, y }`,
+     and `palette::show` initialises the window as a layer-shell
+     surface anchored to top-left with margins (x+4, y+4). Menu-
+     item activation sends `(-1, -1)` and skips the anchor, letting
+     the compositor pick — for any caller without click coords.
+   * **README pass.** New "Tray applet (optional)" section
+     explaining the binary, install via `setup.sh --with-tray`,
+     autostart story, GNOME AppIndicator caveat. Layout section
+     updated to list `src/bin/spanpaper-tray/` and the new
+     `contrib/spanpaper-tray.desktop`.
 
 Total: ~5 working days for a complete, polished result. M1 alone (~2
 hours) delivers most of the day-to-day workflow improvement; everything
