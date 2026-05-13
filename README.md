@@ -166,20 +166,30 @@ What to look for on the screens:
 ## Autostart
 
 Three options, install whichever you prefer (`setup.sh` automates this).
+The two paths are safe to coexist — `spanpaper start` checks the pid file
+and exits cleanly if a daemon is already running.
 
-**A. systemd `--user` unit** (recommended; restart-on-failure + journal logs):
+**A. XDG autostart `.desktop`** (required on Budgie; works on most XDG sessions):
+
+```bash
+install -Dm644 contrib/spanpaper.desktop ~/.config/autostart/spanpaper.desktop
+```
+
+> **Budgie note**: Budgie's session does *not* activate
+> `graphical-session.target`, so any systemd `--user` unit gated on that
+> target will stay inactive across logins. XDG autostart is the reliable
+> path here. Verify with `systemctl --user list-units --state=active --type=target`
+> — if `graphical-session.target` isn't listed, install the `.desktop` above.
+
+**B. systemd `--user` unit** (preferred on Sway/Hyprland/river/etc. — anything
+that *does* activate `graphical-session.target`; gives restart-on-failure
+plus journald logs):
 
 ```bash
 install -Dm644 contrib/spanpaper.service ~/.config/systemd/user/spanpaper.service
 systemctl --user daemon-reload
 systemctl --user enable --now spanpaper.service
 journalctl --user -u spanpaper -f       # live logs
-```
-
-**B. XDG autostart `.desktop`** (works in Budgie, GNOME-flavoured sessions, etc.):
-
-```bash
-install -Dm644 contrib/spanpaper.desktop ~/.config/autostart/spanpaper.desktop
 ```
 
 **C. Budgie Menu → Startup Applications** → command `spanpaper start --background`.

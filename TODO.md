@@ -52,6 +52,14 @@ ffmpeg -i source.mp4 \
   SIGTERM graceful shutdown).
 - `setup.sh`, `gen-test-assets.sh`, systemd user unit, autostart desktop
   file.
+- v0.2.0 auto-detection: --span / --side accept either image or video.
+- vf chain pipelines scale-to-canvas then per-monitor crop, with
+  hwdec=auto-copy-safe so libavfilter sees CPU frames and keepaspect=no so
+  mpv doesn't pillarbox against the source aspect.
+- Persistence wired: config writes atomically on every `spanpaper set`;
+  ~/.config/autostart/spanpaper.desktop relaunches the daemon at login
+  (required on Budgie; graphical-session.target is inert there). systemd
+  --user unit also enabled for sessions that DO activate that target.
 
 ## 💡 Possible follow-ups (not required)
 
