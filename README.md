@@ -23,8 +23,28 @@ swap from MP4 → PNG → MP4 confirmed image/video auto-routing.
 
 ## Quick start
 
+### Arch Linux — install the prebuilt pacman package
+
+Each tagged release ships a `.pkg.tar.zst` as a GitHub release asset. No
+clone, no Rust toolchain, no compile:
+
 ```bash
-git clone <this repo> && cd spanpaper
+# Substitute the latest version — check the Releases page.
+VERSION=0.2.0 PKGREL=1
+curl -LO "https://github.com/imcmurray/spanpaper/releases/download/v$VERSION/spanpaper-bin-$VERSION-$PKGREL-x86_64.pkg.tar.zst"
+sudo pacman -U "spanpaper-bin-$VERSION-$PKGREL-x86_64.pkg.tar.zst"
+yay -S mpvpaper swaybg   # runtime deps, if not already installed
+```
+
+The package puts the binary at `/usr/bin/spanpaper`, a (not-enabled)
+systemd `--user` unit at `/usr/lib/systemd/user/spanpaper.service`, and
+a sample XDG autostart entry at `/usr/share/spanpaper/autostart/spanpaper.desktop`.
+Uninstall is `sudo pacman -R spanpaper-bin`.
+
+### Any wlroots Wayland distro — build from source
+
+```bash
+git clone https://github.com/imcmurray/spanpaper && cd spanpaper
 ./setup.sh --autostart=xdg --start             # build + install + enable + start
 ```
 
@@ -257,18 +277,66 @@ is held as a single frame; CPU drops to ~0% after the first paint.
 | High CPU on playback | Hardware decode failed to engage. Check with: `mpv --hwdec=auto-safe --vo=null --frames=1 yourfile.mp4 2>&1 \| grep -i hwdec` |
 | Daemon "not running" but `pgrep -f spanpaper` shows it | Stale pid file; `rm "$XDG_RUNTIME_DIR/spanpaper/spanpaper.pid"` then `spanpaper start` |
 
+## Releasing
+
+`release.sh` cuts a new tagged release end-to-end. From a clean `main`:
+
+```bash
+./release.sh 0.3.0          # interactive — shows the plan, prompts y/N
+./release.sh 0.3.0 -y       # non-interactive
+./release.sh 0.3.0 2        # same version, pkgrel bump (e.g. repackaged)
+./release.sh -h             # full usage
+```
+
+What it does, in order:
+
+1. **Preflight** — refuses unless the tree is clean, you're on `main`, in
+   sync with `origin`, the tag and GitHub release don't already exist, and
+   all required tools are on PATH (`cargo`, `makepkg`, `fakeroot`, `curl`,
+   `sha256sum`, `gh`, `git`).
+2. **Bump** — rewrites the `[package]` version in `Cargo.toml` and the
+   `pkgver`/`pkgrel` in both `contrib/PKGBUILD*`.
+3. **Smoke build** — `cargo build --release` before doing anything
+   irreversible.
+4. **Commit + tag + push** — `Release vX.Y.Z`, annotated tag, push main +
+   tag.
+5. **Stage binary tarball** — `dist/spanpaper-X.Y.Z-x86_64.tar.gz`
+   containing the release binary, `contrib/`, README, LICENSE.
+6. **Compute checksums** — fetches the GitHub source tarball at the new
+   tag, writes its sha256 into `contrib/PKGBUILD` and the binary tarball's
+   sha256 into `contrib/PKGBUILD-bin`.
+7. **Build the pacman package** — runs `makepkg` against `PKGBUILD-bin` to
+   produce `spanpaper-bin-X.Y.Z-N-x86_64.pkg.tar.zst`.
+8. **Create GitHub release** — uploads both artifacts with install
+   instructions in the release body.
+9. **Commit the checksum updates** to `main` and push.
+
+If anything fails before step 4, the tree is dirty but no external state has
+changed — fix, `git restore .`, retry. Failures after step 4 leave the tag
+and release in a partial state; check the release page and clean up by hand
+if needed.
+
+The PKGBUILDs in `contrib/` stay valid as standalone build recipes too:
+`cd contrib && makepkg -si` (source) or
+`cp PKGBUILD-bin /tmp/x/PKGBUILD && cd /tmp/x && makepkg` (binary).
+
 ## Layout
 
 ```
 spanpaper/
 ├── Cargo.toml
+├── LICENSE                    MIT
 ├── README.md                  (this file)
 ├── TODO.md                    follow-ups
-├── setup.sh                   one-shot installer
+├── setup.sh                   one-shot installer (source build path)
+├── release.sh                 cut a new tagged release end-to-end
 ├── gen-test-assets.sh         span-continuity calibration generator
 ├── contrib/
-│   ├── spanpaper.service      systemd --user unit
-│   └── spanpaper.desktop      XDG autostart entry
+│   ├── spanpaper.service      systemd --user unit (uses @SPANPAPER_BIN@)
+│   ├── spanpaper.desktop      XDG autostart entry (uses @SPANPAPER_BIN@)
+│   ├── PKGBUILD               source-build pacman package recipe
+│   └── PKGBUILD-bin           prebuilt-binary pacman package recipe
+├── dist/                      (generated; gitignored — release artifacts)
 ├── test-assets/               (generated; gitignored)
 └── src/
     ├── main.rs                tracing init + CLI dispatch
@@ -282,4 +350,4 @@ spanpaper/
 
 ## License
 
-MIT.
+MIT — see [LICENSE](LICENSE).
