@@ -102,8 +102,8 @@ fn build_content() -> gtk4::Widget {
         .build();
 
     root.append(&build_layout_row(&outputs, &cfg));
-    root.append(&summary_row("span", cfg.span.as_deref()));
-    root.append(&summary_row("side", cfg.side.as_deref()));
+    root.append(&summary_row("span", Slot::Span, cfg.span.as_deref()));
+    root.append(&summary_row("side", Slot::Side, cfg.side.as_deref()));
 
     let hint = gtk4::Label::builder()
         .label("Drop an image or video onto a box to assign it")
@@ -326,7 +326,7 @@ fn build_output_frame(
     frame
 }
 
-fn summary_row(role: &str, path: Option<&str>) -> gtk4::Box {
+fn summary_row(role: &str, slot: Slot, path: Option<&str>) -> gtk4::Box {
     let row = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .spacing(8)
@@ -346,14 +346,85 @@ fn summary_row(role: &str, path: Option<&str>) -> gtk4::Box {
         .build();
     row.append(&path_label);
 
-    // Disabled in M3 — M6 wires this to the xdg-desktop-portal picker.
+    // Portal-aware file picker via GTK 4.10's FileDialog (wraps
+    // xdg-desktop-portal on Wayland automatically). Same end-state as
+    // a drop: set the slot, populate the window in place.
     let change = gtk4::Button::builder()
         .label("Change…")
-        .sensitive(false)
-        .tooltip_text("File picker lands in M6")
+        .tooltip_text("Pick an image or video to assign to this slot")
         .build();
+    change.connect_clicked(move |btn| {
+        open_file_picker_for(btn, slot);
+    });
     row.append(&change);
     row
+}
+
+fn open_file_picker_for(button: &gtk4::Button, slot: Slot) {
+    let role = match slot {
+        Slot::Span => "span",
+        Slot::Side => "side",
+    };
+
+    // Walk up to the window so the dialog has a parent and so we can
+    // call `populate()` after the picker resolves.
+    let window: Option<gtk4::ApplicationWindow> = button
+        .root()
+        .and_then(|r| r.downcast::<gtk4::ApplicationWindow>().ok());
+
+    let dialog = gtk4::FileDialog::builder()
+        .title(&format!("Set spanpaper {role}"))
+        .modal(true)
+        .build();
+
+    // Filter: same MIME types we list in contrib/spanpaper-set-*.desktop.
+    let filter = gtk4::FileFilter::new();
+    filter.set_name(Some("Images & videos"));
+    for mt in [
+        "image/jpeg", "image/png", "image/webp", "image/bmp", "image/gif",
+        "image/tiff", "image/avif", "image/heif", "image/jxl",
+        "video/mp4", "video/x-matroska", "video/webm", "video/quicktime",
+        "video/x-msvideo", "video/x-ms-wmv", "video/x-flv", "video/mp2t",
+        "video/mpeg", "video/ogg", "video/3gpp", "video/3gpp2",
+    ] {
+        filter.add_mime_type(mt);
+    }
+    let filters = gtk4::gio::ListStore::new::<gtk4::FileFilter>();
+    filters.append(&filter);
+    dialog.set_filters(Some(&filters));
+    dialog.set_default_filter(Some(&filter));
+
+    // FileDialog::open_future returns a glib future. spawn_future_local
+    // runs it on the GTK main loop — no tokio runtime needed on this
+    // thread.
+    let window_for_set = window.clone();
+    gtk4::glib::spawn_future_local(async move {
+        match dialog.open_future(window.as_ref()).await {
+            Ok(file) => {
+                let Some(path) = file.path() else {
+                    tracing::warn!("file picker returned non-local file");
+                    return;
+                };
+                tracing::info!("picker assigned {role}: {}", path.display());
+                if let Err(e) = daemon_client::set_for(slot, &path) {
+                    tracing::warn!("set {role}: {e:#}");
+                    return;
+                }
+                if let Some(win) = window_for_set {
+                    populate(&win);
+                }
+            }
+            Err(e) => {
+                // User cancelled the dialog → glib::Error with code
+                // matching Gtk::DialogError::Dismissed. Nothing to log
+                // for cancellation; warn on anything else.
+                let msg = e.to_string();
+                if !msg.contains("Dismissed") && !msg.contains("cancelled") {
+                    tracing::warn!("file picker: {e}");
+                }
+            }
+        }
+    });
 }
 
 fn basename(p: &Path) -> String {

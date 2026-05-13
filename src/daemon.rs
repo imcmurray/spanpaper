@@ -213,20 +213,20 @@ fn start_workers() -> Result<Vec<Worker>> {
     Ok(spawned)
 }
 
-/// Lockstep the span workers: wait for every span worker's mpv IPC socket
-/// to come up, then broadcast an unpause within a single tight loop so
-/// frame 0 lands on every span monitor at the same wall-clock instant
-/// (modulo display VBlank). This is what keeps the two halves of a
-/// spanned video showing the same frame instead of one drifting ahead
-/// during long SIGHUP-reload cascades (especially when the side output
-/// is also a video and a third mpv contends for hwdec init).
+/// Wait for every IPC-equipped worker's socket to come up, then
+/// broadcast an unpause within a single tight loop. For the span
+/// pair this is the sync the README documents — frame 0 lands on
+/// every span monitor at the same wall-clock instant. For a solo
+/// side video (which now also has IPC so the tray can pause it)
+/// this just unpauses whoever's there; the side worker would
+/// otherwise stay paused since it's spawned with `pause=yes`.
 fn sync_unpause_span_workers(workers: &[Worker]) {
     let sockets: Vec<&std::path::Path> = workers
         .iter()
         .filter_map(|w| w.ipc_socket())
         .collect();
-    if sockets.len() < 2 {
-        // Solo span (or stills): nothing to synchronise.
+    if sockets.is_empty() {
+        // Nothing to unpause (no video workers at all, or stills only).
         return;
     }
 

@@ -427,7 +427,64 @@ them is "do everything else first."
        warning about the missing sequence pattern.
 6. **M6 — File picker fallback + full menu.** `ashpd` file picker for
    click-to-open, full right-click menu with pause/fit/audio/etc.
-   **~1 day.**
+   **~1 day.** ✅ Done.
+   * **File picker**: ended up using `gtk4::FileDialog` (GTK 4.10+,
+     `v4_10` feature flag) instead of `ashpd`. GTK4's FileDialog
+     wraps `xdg-desktop-portal` automatically on Wayland and works
+     natively with `glib::spawn_future_local` — no extra dep, no
+     tokio bridge required. MIME filter populated from the same
+     list as `contrib/spanpaper-set-*.desktop`. The previously
+     disabled "Change…" buttons on the summary rows are now live;
+     flow is identical to drag-and-drop (set, then
+     `populate(window)` in place).
+   * **Right-click menu (full)**: Open palette, Pause/Resume, Span
+     fit submenu (crop/fit/stretch), Side mode submenu (fill/fit/
+     stretch/center/tile), Audio submenu, Open config folder,
+     Reload config, Start/Stop daemon, Quit tray. Per-submenu
+     factory helpers keep `menu()` readable.
+   * **Side mode separate from Span fit**: user testing surfaced
+     that the swaybg `side_mode` knob is what side images need,
+     distinct from `span_fit`. Now independent menu groups. Side
+     videos still use `span_fit` — pre-existing daemon quirk,
+     documented in `daemon_client::set_span_fit`.
+   * **Pause/resume via mpv IPC**: M2's startup-sync already wired
+     sockets for span workers; M6 added them for side video too in
+     `workers.rs::plan`. The tray enumerates
+     `$XDG_RUNTIME_DIR/spanpaper/mpv-*.sock` and broadcasts
+     `set_property pause`. Tray-side `paused: bool` flips the menu
+     label between Pause and Resume; it resets on daemon-down
+     because a fresh daemon always boots unpaused. The daemon's
+     sync-unpause now accepts solo-socket configs (relaxed the
+     old `< 2 sockets returns early` check that would have left a
+     single-IPC side paused forever).
+   * **Open config folder via `org.freedesktop.FileManager1`**:
+     `xdg-open` was honouring a hijacked `inode/directory` MIME
+     default and opening "etag" instead of a file manager. The
+     tray tries the freedesktop FileManager1 D-Bus interface
+     (`ShowFolders`) first — every real file manager implements
+     it — and only falls back to `xdg-open` if no service answers.
+   * **Stop→Start sequencing**: was shelling out to `spanpaper
+     stop` which spin-waits up to 5 s; that blocked the ksni
+     service loop and froze the menu. Replaced with direct
+     `kill(pid, SIGTERM)` + a 5 s bounded wait for the pid file
+     to disappear before returning. `start_daemon` also waits up
+     to 5 s for any lingering shutdown to complete before
+     spawning, belt-and-braces, so the next spanpaper start
+     never sees a stale pid file.
+   * **Menu refresh on every state flip**: Budgie's tray applet
+     doesn't refresh items reliably on dbusmenu's
+     `ItemsPropertiesUpdated` signal — only on `LayoutUpdated`.
+     ksni only fires LayoutUpdated when the menu's *structure*
+     (child IDs) differs, not when only enabled flags flip. So
+     "show both Start and Stop, grey out the wrong one" left
+     Budgie caching the cold-start layout and silently swallowing
+     clicks on items it thought were disabled. Fix: conditionally
+     INCLUDE/EXCLUDE daemon-dependent items based on `running`
+     rather than always emitting them with `enabled: running`.
+     The shrink-grow on every state transition is enough of a
+     structural diff that LayoutUpdated fires and Budgie
+     re-renders. Bonus UX win: no greyed-out useless menu items
+     when the daemon is stopped.
 7. **M7 — Polish.** Icon states (playing/paused/error), focus-out
    auto-close, accessibility labels, autostart `.desktop`,
    documentation pass. **~½ day.** *In-place palette refresh after

@@ -292,16 +292,24 @@ pub fn plan(cfg: &Config, detected: &[Output]) -> Result<Vec<WorkerKind>> {
                 path: path.clone(),
                 mode: cfg.side_mode.clone(),
             }),
-            MediaKind::Video => plan.push(WorkerKind::Mpv {
-                output: out.clone(),
-                path: path.clone(),
-                vf: None,
-                media: MediaKind::Video,
-                audio: false,
-                fit: cfg.span_fit.clone(),
-                extra: cfg.extra_mpv_options.clone(),
-                ipc_socket: None,
-            }),
+            MediaKind::Video => {
+                // Side video also gets an IPC socket so the tray can
+                // pause/resume it alongside the span pair. We don't
+                // need it for daemon-internal sync (side is solo), but
+                // the tray broadcasts pause across every mpv-*.sock in
+                // the runtime dir, so the side worker must be a peer.
+                let ipc_socket = Some(ipc::socket_dir()?.join(format!("mpv-{}.sock", out)));
+                plan.push(WorkerKind::Mpv {
+                    output: out.clone(),
+                    path: path.clone(),
+                    vf: None,
+                    media: MediaKind::Video,
+                    audio: false,
+                    fit: cfg.span_fit.clone(),
+                    extra: cfg.extra_mpv_options.clone(),
+                    ipc_socket,
+                });
+            }
         }
     }
 

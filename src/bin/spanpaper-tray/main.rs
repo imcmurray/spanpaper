@@ -23,7 +23,10 @@ mod thumbnail;
 
 use anyhow::Result;
 use gtk4::prelude::*;
-use ksni::{menu::StandardItem, MenuItem, ToolTip, Tray, TrayMethods};
+use ksni::{
+    menu::{StandardItem, SubMenu},
+    MenuItem, ToolTip, Tray, TrayMethods,
+};
 use std::time::Duration;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
@@ -36,9 +39,15 @@ enum UiMsg {
 #[derive(Debug)]
 struct SpanpaperTray {
     daemon_running: bool,
+    // Last-commanded playback state, not a live read of mpv. Kept here
+    // so the right-click menu can show Pause or Resume appropriately.
+    // After a daemon restart workers come back unpaused regardless, so
+    // this can briefly disagree with reality — clicking Resume is a
+    // no-op in that case and clicking Pause resyncs.
+    paused: bool,
     // Cloned into ksni's activate/menu callbacks so left-click and
-    // future menu items can request UI on the GTK thread without
-    // blocking the tokio runtime.
+    // menu items can request UI on the GTK thread without blocking
+    // the tokio runtime.
     ui_tx: async_channel::Sender<UiMsg>,
 }
 
@@ -78,46 +87,169 @@ impl Tray for SpanpaperTray {
     }
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
+        // KEY DESIGN POINT: we conditionally INCLUDE/EXCLUDE entire
+        // groups of items based on daemon state, rather than always
+        // emitting them and just toggling `enabled`. Per ksni's source,
+        // only structural diffs (children-list changes) fire
+        // LayoutUpdated; pure enabled-flag flips emit
+        // ItemsPropertiesUpdated, which Budgie's tray applet refreshes
+        // poorly — the result was Budgie cached the cold-start menu
+        // and silently swallowed clicks on items it thought were
+        // disabled. Show only what's actionable, hide everything else.
         let running = self.daemon_running;
+        let paused = self.paused;
         let tx = self.ui_tx.clone();
-        vec![
+        let mut items: Vec<MenuItem<Self>> = Vec::new();
+
+        if running {
+            items.push(
+                StandardItem {
+                    label: "Open palette".into(),
+                    icon_name: "preferences-desktop-wallpaper".into(),
+                    activate: Box::new(move |_| {
+                        let _ = tx.try_send(UiMsg::ShowPalette);
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+            );
+            items.push(MenuItem::Separator);
+
+            // Pause / Resume swaps label based on tray-side state.
+            items.push(if paused {
+                StandardItem {
+                    label: "Resume playback".into(),
+                    icon_name: "media-playback-start".into(),
+                    activate: Box::new(|tray: &mut Self| {
+                        daemon_client::resume_playback();
+                        tray.paused = false;
+                    }),
+                    ..Default::default()
+                }
+                .into()
+            } else {
+                StandardItem {
+                    label: "Pause playback".into(),
+                    icon_name: "media-playback-pause".into(),
+                    activate: Box::new(|tray: &mut Self| {
+                        daemon_client::pause_playback();
+                        tray.paused = true;
+                    }),
+                    ..Default::default()
+                }
+                .into()
+            });
+
+            items.push(
+                SubMenu {
+                    label: "Span fit".into(),
+                    submenu: vec![
+                        span_fit_item("Crop (zoom-fill, default)", "crop"),
+                        span_fit_item("Fit (letterbox)", "fit"),
+                        span_fit_item("Stretch", "stretch"),
+                    ],
+                    ..Default::default()
+                }
+                .into(),
+            );
+
+            items.push(
+                SubMenu {
+                    // swaybg's modes; applies to side images. Side videos
+                    // currently inherit Span fit (pre-existing daemon
+                    // quirk — documented in daemon_client::set_span_fit).
+                    label: "Side mode (image)".into(),
+                    submenu: vec![
+                        side_mode_item("Fill (default)", "fill"),
+                        side_mode_item("Fit", "fit"),
+                        side_mode_item("Stretch", "stretch"),
+                        side_mode_item("Center", "center"),
+                        side_mode_item("Tile", "tile"),
+                    ],
+                    ..Default::default()
+                }
+                .into(),
+            );
+
+            items.push(
+                SubMenu {
+                    label: "Audio".into(),
+                    submenu: vec![
+                        audio_item("On", true),
+                        audio_item("Off (default)", false),
+                    ],
+                    ..Default::default()
+                }
+                .into(),
+            );
+
+            items.push(MenuItem::Separator);
+        }
+
+        items.push(
             StandardItem {
-                label: "Open palette".into(),
-                icon_name: "preferences-desktop-wallpaper".into(),
-                activate: Box::new(move |_| {
-                    let _ = tx.try_send(UiMsg::ShowPalette);
-                }),
-                ..Default::default()
-            }
-            .into(),
-            MenuItem::Separator,
-            StandardItem {
-                label: "Start daemon".into(),
-                enabled: !running,
-                activate: Box::new(|tray: &mut Self| {
-                    if let Err(e) = daemon_client::start_daemon() {
-                        tracing::warn!("start daemon: {e}");
-                    } else {
-                        tray.daemon_running = true;
+                label: "Open config folder".into(),
+                icon_name: "folder-open".into(),
+                activate: Box::new(|_| {
+                    if let Err(e) = daemon_client::open_config_folder() {
+                        tracing::warn!("open config folder: {e}");
                     }
                 }),
                 ..Default::default()
             }
             .into(),
+        );
+
+        if running {
+            items.push(
+                StandardItem {
+                    label: "Reload config".into(),
+                    icon_name: "view-refresh".into(),
+                    activate: Box::new(|_| {
+                        if let Err(e) = daemon_client::reload_daemon() {
+                            tracing::warn!("reload daemon: {e}");
+                        }
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+            );
+        }
+
+        items.push(MenuItem::Separator);
+
+        items.push(if running {
             StandardItem {
                 label: "Stop daemon".into(),
-                enabled: running,
                 activate: Box::new(|tray: &mut Self| {
                     if let Err(e) = daemon_client::stop_daemon() {
                         tracing::warn!("stop daemon: {e}");
                     } else {
                         tray.daemon_running = false;
+                        tray.paused = false;
                     }
                 }),
                 ..Default::default()
             }
-            .into(),
-            MenuItem::Separator,
+            .into()
+        } else {
+            StandardItem {
+                label: "Start daemon".into(),
+                activate: Box::new(|tray: &mut Self| {
+                    if let Err(e) = daemon_client::start_daemon() {
+                        tracing::warn!("start daemon: {e}");
+                    } else {
+                        tray.daemon_running = true;
+                        tray.paused = false;
+                    }
+                }),
+                ..Default::default()
+            }
+            .into()
+        });
+
+        items.push(MenuItem::Separator);
+        items.push(
             StandardItem {
                 label: "Quit tray".into(),
                 icon_name: "application-exit".into(),
@@ -125,8 +257,51 @@ impl Tray for SpanpaperTray {
                 ..Default::default()
             }
             .into(),
-        ]
+        );
+        items
     }
+}
+
+// ---- per-submenu item factories -------------------------------------------
+// Plain closures; declared as free functions to keep menu() readable.
+
+fn span_fit_item(label: &str, value: &'static str) -> MenuItem<SpanpaperTray> {
+    StandardItem {
+        label: label.into(),
+        activate: Box::new(move |_| {
+            if let Err(e) = daemon_client::set_span_fit(value) {
+                tracing::warn!("set span-fit {value}: {e}");
+            }
+        }),
+        ..Default::default()
+    }
+    .into()
+}
+
+fn side_mode_item(label: &str, value: &'static str) -> MenuItem<SpanpaperTray> {
+    StandardItem {
+        label: label.into(),
+        activate: Box::new(move |_| {
+            if let Err(e) = daemon_client::set_side_mode(value) {
+                tracing::warn!("set side-mode {value}: {e}");
+            }
+        }),
+        ..Default::default()
+    }
+    .into()
+}
+
+fn audio_item(label: &str, on: bool) -> MenuItem<SpanpaperTray> {
+    StandardItem {
+        label: label.into(),
+        activate: Box::new(move |_| {
+            if let Err(e) = daemon_client::set_audio(on) {
+                tracing::warn!("set audio {on}: {e}");
+            }
+        }),
+        ..Default::default()
+    }
+    .into()
 }
 
 fn main() -> Result<()> {
@@ -210,6 +385,7 @@ async fn run_tray_service(ui_tx: async_channel::Sender<UiMsg>) -> Result<()> {
     let initial = daemon_client::daemon_alive();
     let tray = SpanpaperTray {
         daemon_running: initial,
+        paused: false,
         ui_tx,
     };
     let handle = tray
@@ -235,6 +411,13 @@ async fn run_tray_service(ui_tx: async_channel::Sender<UiMsg>) -> Result<()> {
                     );
                     handle.update(|t: &mut SpanpaperTray| {
                         t.daemon_running = now_state;
+                        // A fresh daemon always boots unpaused (workers
+                        // spawn with pause=yes and the supervisor sync-
+                        // unpauses them). Reset our stale flag so the
+                        // menu shows Pause, not Resume.
+                        if !now_state {
+                            t.paused = false;
+                        }
                     }).await;
                     last_state = now_state;
                 }
