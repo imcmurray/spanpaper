@@ -1,21 +1,23 @@
 # Maintainer: Ian McMurray <ian.mcmurray@gmail.com>
 #
-# Binary AUR template for `spanpaper-bin`. Pulls a prebuilt x86_64 tarball
-# from the GitHub release rather than rebuilding from source — install in
-# seconds, no Rust toolchain required.
+# Binary pacman package for spanpaper. Pulls the prebuilt x86_64 tarball
+# from the GitHub release — installs in seconds, no Rust toolchain
+# required. This is the PKGBUILD used to produce the .pkg.tar.zst
+# attached to each GitHub release.
 #
-# Build/install locally:
-#   cd contrib && makepkg -p PKGBUILD-bin -si
+# Build the .pkg.tar.zst from here:
+#   cp PKGBUILD-bin /tmp/build/PKGBUILD && cd /tmp/build && makepkg
 #
-# AUR submission workflow (maintainer-only):
-#   1. Build + upload the release tarball to GitHub:
-#        gh release upload v$pkgver \
-#            dist/spanpaper-$pkgver-x86_64.tar.gz --clobber
-#   2. Bump `pkgver`, reset `pkgrel=1`
-#   3. Run: updpkgsums -p PKGBUILD-bin
-#        (or: sha256sum dist/spanpaper-$pkgver-x86_64.tar.gz)
-#   4. Run: makepkg -p PKGBUILD-bin --printsrcinfo > .SRCINFO
-#   5. Commit + push to ssh://aur@aur.archlinux.org/spanpaper-bin.git
+# Install on a fresh machine without building anything:
+#   curl -LO https://github.com/imcmurray/spanpaper/releases/download/v0.2.0/spanpaper-bin-0.2.0-1-x86_64.pkg.tar.zst
+#   sudo pacman -U spanpaper-bin-0.2.0-1-x86_64.pkg.tar.zst
+#
+# Cutting a new version:
+#   1. Upload the new binary tarball to the GitHub release.
+#   2. Bump pkgver, reset pkgrel=1.
+#   3. Run `updpkgsums` (copy this file to PKGBUILD first — updpkgsums
+#      doesn't take a -p flag).
+#   4. Rebuild this .pkg.tar.zst and upload it to the release.
 
 pkgname=spanpaper-bin
 _pkgname=spanpaper

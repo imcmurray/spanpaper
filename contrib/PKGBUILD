@@ -1,16 +1,17 @@
 # Maintainer: Ian McMurray <ian.mcmurray@gmail.com>
 #
-# Source-build PKGBUILD for spanpaper. Lives in-repo as a reference;
-# the AUR-submitted copy lives in its own AUR git tree.
+# Source-build pacman package for spanpaper. Pulls the tagged source
+# tarball from GitHub, compiles, and produces a .pkg.tar.zst you can
+# install with `pacman -U`.
 #
-# Build/install locally:
+# Build + install on this machine:
 #   cd contrib && makepkg -si
 #
-# AUR submission workflow (maintainer-only):
-#   1. Bump `pkgver` and reset `pkgrel=1`
-#   2. Run: updpkgsums      # rewrites sha256sums from the live tarball
-#   3. Run: makepkg --printsrcinfo > .SRCINFO
-#   4. Commit + push to ssh://aur@aur.archlinux.org/spanpaper.git
+# Build only (just produce the .pkg.tar.zst for copying elsewhere):
+#   cd contrib && makepkg
+#
+# Cutting a new version: bump pkgver, then run `updpkgsums` to refresh
+# the sha256 against the live GitHub tarball.
 
 pkgname=spanpaper
 pkgver=0.2.0
