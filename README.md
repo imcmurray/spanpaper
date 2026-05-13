@@ -94,8 +94,18 @@ background surface. Video playback is hardware-decoded (VA-API on Intel/AMD,
 NVDEC on NVIDIA): span workers run `hwdec=auto-copy-safe` so libavfilter
 sees CPU-resident frames for the scale/crop chain; the solo side worker
 runs the slightly faster `hwdec=auto-safe` because it doesn't apply
-software filters. Two decoders opening the same file start in lockstep and
-stay in sync at the millisecond level for the lifetime of a session.
+software filters.
+
+**Span sync.** Two independent `mpvpaper` decoders looping the same file
+will drift in and out of phase over time — most visibly when a SIGHUP
+reload kicks off three new `mpvpaper`s (span pair + side video) in one
+spawn batch, where hwdec init contends and each instance reaches "first
+frame ready" at slightly different wall-clock times. spanpaper handles
+this by spawning each span worker with `--input-ipc-server=$XDG_RUNTIME_DIR/spanpaper/mpv-<output>.sock`
+and `pause=yes start=0`; once every socket is connectable, the daemon
+broadcasts a synchronous unpause to all span workers within a few hundred
+microseconds. Measured drift between the two span instances is 0 ms
+across reloads, side-swap SIGHUPs, and loop-boundary wraparounds.
 
 ## Requirements
 
@@ -152,6 +162,26 @@ span_direction = "vertical"        # "vertical" stacks | "horizontal" side-by-si
 span_fit     = "crop"              # crop (zoom-fill) | fit (letterbox) | stretch
 extra_mpv_options = []             # raw mpv opts appended to every video worker
 ```
+
+## Right-click in your file manager
+
+Both `setup.sh` and the pacman packages install two MIME-only `.desktop`
+entries — `spanpaper-set-span` and `spanpaper-set-side`. They don't appear
+in the application menu, but any file manager that respects XDG MIME
+associations (Nautilus / Files, Nemo, Dolphin, Thunar, PCManFM-Qt, …)
+offers them under **Open With → Set as spanpaper span / Set as spanpaper
+side** for any image or video.
+
+Picking one is exactly equivalent to running:
+
+```bash
+spanpaper set --span /path/to/that/file        # or --side
+```
+
+— same atomic config rewrite, same SIGHUP hot-reload, no terminal. If the
+file's "Open With" list doesn't show them right away, run
+`update-desktop-database ~/.local/share/applications` (source install) or
+log out and back in (pacman install) to refresh the MIME cache.
 
 ## Test / calibrate
 

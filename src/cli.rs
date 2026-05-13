@@ -102,10 +102,10 @@ fn cmd_set(a: SetArgs) -> Result<()> {
     let mut cfg = Config::load_or_default().context("loading config")?;
 
     if let Some(v) = a.span {
-        cfg.span = Some(canonicalize_user_path(&v)?);
+        cfg.span = Some(validated_media_path(&v, "--span")?);
     }
     if let Some(i) = a.side {
-        cfg.side = Some(canonicalize_user_path(&i)?);
+        cfg.side = Some(validated_media_path(&i, "--side")?);
     }
     if a.audio   { cfg.audio = true;  }
     if a.no_audio{ cfg.audio = false; }
@@ -179,13 +179,37 @@ fn cmd_outputs() -> Result<()> {
     Ok(())
 }
 
-/// Expand ~ / env vars and canonicalize to absolute. We don't require the
-/// file to exist (config may be written before files are placed), so we fall
-/// back to the absolute form if canonicalize() fails.
-fn canonicalize_user_path(p: &std::path::Path) -> Result<PathBuf> {
-    let expanded = shellexpand::full(&p.to_string_lossy())
-        .map_err(|e| anyhow::anyhow!("path expansion: {e}"))?
+/// Validate, expand ~ / env vars, and canonicalize a user-supplied media
+/// path. Rejects obviously-broken input (empty / newlines / NUL bytes — no
+/// real Linux filesystem path contains those, and accepting them has
+/// corrupted config files in the past when callers piped multi-line shell
+/// output into `--span`/`--side`). Warns but doesn't fail on a missing
+/// file: the config may legitimately be written before the media is
+/// placed, and the daemon validates again at load time.
+fn validated_media_path(p: &std::path::Path, flag: &str) -> Result<PathBuf> {
+    let raw = p.to_string_lossy();
+    if raw.is_empty() {
+        anyhow::bail!("{flag}: empty path");
+    }
+    if raw.contains('\n') || raw.contains('\0') {
+        anyhow::bail!(
+            "{flag}: path contains newline or NUL byte — \
+             refusing to write garbage into config (got {raw:?})"
+        );
+    }
+
+    let expanded = shellexpand::full(&raw)
+        .map_err(|e| anyhow::anyhow!("{flag}: path expansion: {e}"))?
         .into_owned();
     let pb = PathBuf::from(expanded);
-    Ok(pb.canonicalize().unwrap_or(pb))
+    let resolved = pb.canonicalize().unwrap_or_else(|_| pb.clone());
+
+    if !resolved.exists() {
+        tracing::warn!(
+            "{flag}: path does not exist yet — writing to config anyway, \
+             but the daemon will refuse to start until it appears: {}",
+            resolved.display()
+        );
+    }
+    Ok(resolved)
 }

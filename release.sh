@@ -161,6 +161,8 @@ mkdir -p "$PKGDIR/contrib"
 cp target/release/spanpaper            "$PKGDIR/spanpaper"
 cp contrib/spanpaper.service           "$PKGDIR/contrib/"
 cp contrib/spanpaper.desktop           "$PKGDIR/contrib/"
+cp contrib/spanpaper-set-span.desktop  "$PKGDIR/contrib/"
+cp contrib/spanpaper-set-side.desktop  "$PKGDIR/contrib/"
 cp README.md LICENSE                   "$PKGDIR/"
 tar -C "$STAGE" --owner=0 --group=0 \
     -czf "dist/spanpaper-$VERSION-x86_64.tar.gz" \

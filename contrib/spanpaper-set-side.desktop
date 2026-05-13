@@ -1,0 +1,23 @@
+[Desktop Entry]
+Type=Application
+Name=Set as spanpaper side
+GenericName=Side-monitor wallpaper
+Comment=Use this file as the independent side-monitor wallpaper
+# IMPORTANT: setup.sh substitutes @SPANPAPER_BIN@ with the real path. File
+# managers spawn Exec= with the session's PATH (typically /usr/local/bin:
+# /usr/bin:/bin, no ~/.local/bin), so the Exec= field MUST be an absolute
+# path for ad-hoc installs. The pacman packages substitute /usr/bin/spanpaper.
+#
+# %f passes a single local file path. The daemon rewrites its config and
+# SIGHUPs itself; if the daemon isn't running, it's a no-op write — start
+# the daemon yourself afterwards.
+Exec=@SPANPAPER_BIN@ set --side %f
+Icon=preferences-desktop-wallpaper
+Terminal=false
+# MIME list matches src/media.rs IMAGE_EXTS + VIDEO_EXTS. Wildcards
+# (image/*, video/*) are unreliable across file managers, so we enumerate.
+MimeType=image/jpeg;image/png;image/webp;image/bmp;image/gif;image/tiff;image/avif;image/heif;image/jxl;video/mp4;video/x-matroska;video/webm;video/quicktime;video/x-msvideo;video/x-ms-wmv;video/x-flv;video/mp2t;video/mpeg;video/ogg;video/3gpp;video/3gpp2;
+# NoDisplay keeps this out of the app menu — it appears ONLY in the
+# "Open With" lists of file managers, which is the entire purpose.
+NoDisplay=true
+Categories=Graphics;

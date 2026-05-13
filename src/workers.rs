@@ -30,6 +30,7 @@ use std::{
 
 use crate::{
     config::{Config, SpanDirection},
+    ipc,
     media::MediaKind,
     outputs::Output,
 };
@@ -48,6 +49,12 @@ pub enum WorkerKind {
     /// vf chain already produces output sized exactly for the monitor);
     /// `vf = None` for a solo video on the side output (mpv fits via
     /// panscan/keepaspect per `fit`).
+    ///
+    /// `ipc_socket = Some(path)` opts the worker into IPC-based startup
+    /// sync: spawn paused with `--input-ipc-server=PATH`, and the daemon
+    /// broadcasts a synchronous unpause to all span workers once their
+    /// sockets are up. None for solo workers (side output) — sync has
+    /// nothing to synchronise against.
     Mpv {
         output: String,
         path: PathBuf,
@@ -56,6 +63,7 @@ pub enum WorkerKind {
         audio: bool,
         fit: String,
         extra: Vec<String>,
+        ipc_socket: Option<PathBuf>,
     },
     /// swaybg for a static image on a single output.
     Swaybg {
@@ -68,9 +76,9 @@ pub enum WorkerKind {
 impl Worker {
     pub fn spawn(kind: WorkerKind) -> Result<Self> {
         let (label, child) = match &kind {
-            WorkerKind::Mpv { output, path, vf, media, audio, fit, extra } => (
+            WorkerKind::Mpv { output, path, vf, media, audio, fit, extra, ipc_socket } => (
                 format!("mpv:{output}"),
-                spawn_mpv(output, path, vf.as_deref(), *media, *audio, fit, extra)?,
+                spawn_mpv(output, path, vf.as_deref(), *media, *audio, fit, extra, ipc_socket.as_deref())?,
             ),
             WorkerKind::Swaybg { output, path, mode } => (
                 format!("swaybg:{output}"),
@@ -84,6 +92,16 @@ impl Worker {
             started_at: Instant::now(),
             recent_failures: 0,
         })
+    }
+
+    /// Path to the mpv IPC socket for this worker, if it has one (only
+    /// span workers do). The daemon uses this to broadcast a sync-unpause
+    /// after every worker has finished spawning.
+    pub fn ipc_socket(&self) -> Option<&Path> {
+        match &self.kind {
+            WorkerKind::Mpv { ipc_socket: Some(p), .. } => Some(p.as_path()),
+            _ => None,
+        }
     }
 
     pub fn poll_and_maybe_restart(&mut self) -> Result<bool> {
@@ -115,6 +133,28 @@ impl Worker {
                 self.child = new.child;
                 self.started_at = Instant::now();
                 tracing::info!("{}: restarted", self.label);
+
+                // The spawn opts say `pause=yes` for span workers so the
+                // initial cold-start can be sync-unpaused as a group. On
+                // an individual crash-restart there's nothing to
+                // synchronise against; just unpause so the restarted
+                // worker rejoins playback instead of sitting frozen.
+                // It'll be out of sync with the surviving worker until
+                // the user reloads — accept that vs. a black/frozen tile.
+                if let WorkerKind::Mpv { ipc_socket: Some(sock), .. } = &self.kind {
+                    if crate::ipc::wait_for_socket(sock, Duration::from_secs(5)) {
+                        if let Err(e) = crate::ipc::unpause(sock) {
+                            tracing::warn!(
+                                "{}: post-restart unpause failed: {e:#}", self.label
+                            );
+                        }
+                    } else {
+                        tracing::warn!(
+                            "{}: ipc socket {} never came up after restart",
+                            self.label, sock.display()
+                        );
+                    }
+                }
                 Ok(true)
             }
         }
@@ -210,9 +250,18 @@ pub fn plan(cfg: &Config, detected: &[Output]) -> Result<Vec<WorkerKind>> {
                 "span canvas: {vw}x{vh} ({} outputs, direction={:?})",
                 group.len(), cfg.span_direction
             );
+            // Each span worker gets its own mpv IPC socket so the daemon
+            // can lockstep them. Only emit sockets for video — for stills
+            // the workers hold one frame and sync is a no-op concept.
+            let sock_dir = if span_media == MediaKind::Video && group.len() >= 2 {
+                Some(ipc::socket_dir()?)
+            } else {
+                None
+            };
             for (i, out) in group.iter().enumerate() {
                 let (x, y) = offsets[i];
                 let vf = build_span_vf(vw, vh, out.width, out.height, x, y, &cfg.span_fit);
+                let ipc_socket = sock_dir.as_ref().map(|d| d.join(format!("mpv-{}.sock", out.name)));
                 plan.push(WorkerKind::Mpv {
                     output: out.name.clone(),
                     path: span_path.clone(),
@@ -221,6 +270,7 @@ pub fn plan(cfg: &Config, detected: &[Output]) -> Result<Vec<WorkerKind>> {
                     audio: cfg.audio && i == 0 && span_media == MediaKind::Video,
                     fit: cfg.span_fit.clone(),
                     extra: cfg.extra_mpv_options.clone(),
+                    ipc_socket,
                 });
             }
         }
@@ -250,6 +300,7 @@ pub fn plan(cfg: &Config, detected: &[Output]) -> Result<Vec<WorkerKind>> {
                 audio: false,
                 fit: cfg.span_fit.clone(),
                 extra: cfg.extra_mpv_options.clone(),
+                ipc_socket: None,
             }),
         }
     }
@@ -268,11 +319,24 @@ fn spawn_mpv(
     audio: bool,
     fit: &str,
     extra: &[String],
+    ipc_socket: Option<&Path>,
 ) -> Result<Child> {
     let bin = which::which("mpvpaper")
         .context("`mpvpaper` not found on PATH (install: pacman -S mpvpaper)")?;
 
     let mut opts: Vec<String> = vec!["loop-file=inf".into()];
+    if let Some(sock) = ipc_socket {
+        // Stale socket from a previous run would make mpv silently fail to
+        // bind. mpv removes its own socket on graceful exit but SIGKILL
+        // can leave one behind.
+        let _ = std::fs::remove_file(sock);
+        opts.push(format!("input-ipc-server={}", sock.display()));
+        // Spawn paused at frame 0 — the daemon will broadcast an unpause
+        // once every span worker's socket is up, so they begin playback
+        // in lockstep regardless of per-process startup variance.
+        opts.push("pause=yes".into());
+        opts.push("start=0".into());
+    }
     if vf.is_some() {
         // Software filters (scale/crop) need CPU-resident frames; pure
         // `hwdec=auto-safe` keeps frames in CUDA/VAAPI memory and our

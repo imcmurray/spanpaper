@@ -62,6 +62,18 @@ package() {
         > "$pkgdir/usr/share/spanpaper/autostart/spanpaper.desktop"
     chmod 644 "$pkgdir/usr/share/spanpaper/autostart/spanpaper.desktop"
 
+    # "Open With" entries for file-manager right-click → set as span/side.
+    # These land in /usr/share/applications/ (NOT NoDisplay-skipped from MIME
+    # association) so every user on the box can right-click an image or video
+    # and pick "Open With → Set as spanpaper span / side".
+    install -d "$pkgdir/usr/share/applications"
+    for slot in span side; do
+        sed "s|@SPANPAPER_BIN@|/usr/bin/spanpaper|g" \
+            "contrib/spanpaper-set-$slot.desktop" \
+            > "$pkgdir/usr/share/applications/spanpaper-set-$slot.desktop"
+        chmod 644 "$pkgdir/usr/share/applications/spanpaper-set-$slot.desktop"
+    done
+
     install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
     install -Dm644 LICENSE   "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

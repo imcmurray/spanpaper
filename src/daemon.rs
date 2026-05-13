@@ -24,6 +24,7 @@ use std::{
 
 use crate::{
     config::Config,
+    ipc,
     outputs,
     workers::{self, Worker},
 };
@@ -194,7 +195,61 @@ fn start_workers() -> Result<Vec<Worker>> {
             }
         }
     }
+
+    sync_unpause_span_workers(&spawned);
     Ok(spawned)
+}
+
+/// Lockstep the span workers: wait for every span worker's mpv IPC socket
+/// to come up, then broadcast an unpause within a single tight loop so
+/// frame 0 lands on every span monitor at the same wall-clock instant
+/// (modulo display VBlank). This is what keeps the two halves of a
+/// spanned video showing the same frame instead of one drifting ahead
+/// during long SIGHUP-reload cascades (especially when the side output
+/// is also a video and a third mpv contends for hwdec init).
+fn sync_unpause_span_workers(workers: &[Worker]) {
+    let sockets: Vec<&std::path::Path> = workers
+        .iter()
+        .filter_map(|w| w.ipc_socket())
+        .collect();
+    if sockets.len() < 2 {
+        // Solo span (or stills): nothing to synchronise.
+        return;
+    }
+
+    tracing::info!("syncing {} span worker(s) via mpv ipc", sockets.len());
+    let wait_start = std::time::Instant::now();
+    for s in &sockets {
+        if !ipc::wait_for_socket(s, Duration::from_secs(5)) {
+            tracing::warn!(
+                "mpv ipc socket {} never came up — sync skipped; \
+                 span will likely look out of phase",
+                s.display()
+            );
+            // Best-effort: try to unpause whoever we can, otherwise the
+            // user sees a paused first frame instead of playback.
+            for s in &sockets {
+                let _ = ipc::unpause(s);
+            }
+            return;
+        }
+    }
+    tracing::debug!("all sockets up in {}ms", wait_start.elapsed().as_millis());
+
+    let send_start = std::time::Instant::now();
+    let mut errors = 0_usize;
+    for s in &sockets {
+        if let Err(e) = ipc::unpause(s) {
+            tracing::error!("unpause {}: {e:#}", s.display());
+            errors += 1;
+        }
+    }
+    tracing::info!(
+        "span unpause broadcast: {} worker(s) in {}µs ({} error(s))",
+        sockets.len(),
+        send_start.elapsed().as_micros(),
+        errors
+    );
 }
 
 fn write_pid_file(path: &PathBuf) -> Result<()> {

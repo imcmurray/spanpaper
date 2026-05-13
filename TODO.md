@@ -60,15 +60,24 @@ ffmpeg -i source.mp4 \
   ~/.config/autostart/spanpaper.desktop relaunches the daemon at login
   (required on Budgie; graphical-session.target is inert there). systemd
   --user unit also enabled for sessions that DO activate that target.
+- **Active span sync via mpv IPC**: span workers spawn paused with
+  `--input-ipc-server=…` and the daemon broadcasts a synchronous unpause
+  once every socket is up. Eliminates the visible drift that appeared
+  after a `spanpaper set --side <video>` SIGHUP-reload, where adding a
+  third mpvpaper to the spawn batch widened per-worker startup variance.
+  Verified at 0 ms drift across cold start, reload, side-swap SIGHUP,
+  and loop-wrap boundaries.
 
 ## 💡 Possible follow-ups (not required)
 
-- **Periodic resync seek**: long loops with two independent mpvpaper
-  instances *can* drift sub-frame over hours. Calibration timestamps proved
-  sync at startup; if you ever notice drift, the daemon could send periodic
-  IPC seeks via mpv's JSON IPC (`--input-ipc-server=/run/user/.../mpvpaper-NN.sock`).
-  Not needed yet — current sync was perfect at the millisecond level in
-  testing.
+- **Periodic resync seek**: span workers now sync at every cold start /
+  SIGHUP-reload via mpv IPC (see "Span sync" in README). Measured drift is
+  0 ms across reloads and loop wraparounds, so periodic resync isn't
+  needed for normal use — but multi-hour sessions could still benefit
+  from a heartbeat: every N seconds, read worker 0's `time-pos` and
+  broadcast `seek $t absolute exact` to the others. Cheap to add (~30
+  LoC in `daemon.rs`'s supervisor loop) if drift is ever observed in
+  the wild.
 - **Auto-detect span groups**: instead of hard-coding `span_outputs`,
   `spanpaper` could scan `wl_output` positions for any two outputs that are
   vertically contiguous (`y2 == y1 + h1`) and span them automatically.

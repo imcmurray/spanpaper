@@ -22,6 +22,9 @@ BIN_SRC="$REPO_DIR/target/release/spanpaper"
 BIN_DST="$HOME/.local/bin/spanpaper"
 SYSTEMD_DST="$HOME/.config/systemd/user/spanpaper.service"
 AUTOSTART_DST="$HOME/.config/autostart/spanpaper.desktop"
+APPS_DIR="$HOME/.local/share/applications"
+OPENWITH_SPAN_DST="$APPS_DIR/spanpaper-set-span.desktop"
+OPENWITH_SIDE_DST="$APPS_DIR/spanpaper-set-side.desktop"
 
 # ---- flags -------------------------------------------------------------------
 
@@ -163,6 +166,93 @@ ok "built $BIN_SRC ($(du -h "$BIN_SRC" | cut -f1))"
 step "Installing binary"
 install -Dm755 "$BIN_SRC" "$BIN_DST"
 ok "installed -> $BIN_DST"
+
+# ---- 5b. "Open With" entries -------------------------------------------------
+# Two MimeType-only .desktop files that let file managers offer
+# "Open With → Set as spanpaper span / side" on any image or video.
+# NoDisplay=true keeps them out of the app menu.
+#
+# CAREFUL: declaring MimeType= on a .desktop file makes it a candidate
+# for "default app for that MIME type". If the user has no explicit
+# default set for (say) image/jpeg, gio's fallback picks the
+# first-registered associated app — and alphabetically ours often wins,
+# which would silently turn every JPEG double-click into a wallpaper
+# change. To prevent this, we snapshot the current default for every
+# MIME type we claim BEFORE installing, then re-pin those defaults
+# AFTER — restoring whatever was there, including the implicit fallback,
+# so we only ever appear in "Open With" submenus, never as default.
+
+# Source of truth for this list: contrib/spanpaper-set-*.desktop MimeType=
+SPANPAPER_MIMES=(
+    image/jpeg image/png image/webp image/bmp image/gif image/tiff
+    image/avif image/heif image/jxl
+    video/mp4 video/x-matroska video/webm video/quicktime
+    video/x-msvideo video/x-ms-wmv video/x-flv video/mp2t video/mpeg
+    video/ogg video/3gpp video/3gpp2
+)
+
+step "Installing right-click 'Open With' entries"
+
+# 1. Snapshot prior defaults.
+declare -A PRIOR_DEFAULTS=()
+for mime in "${SPANPAPER_MIMES[@]}"; do
+    prior="$(xdg-mime query default "$mime" 2>/dev/null || true)"
+    # Skip if no real prior or it was already one of ours (re-run case).
+    case "$prior" in
+        ""|spanpaper-set-*) ;;
+        *) PRIOR_DEFAULTS["$mime"]="$prior" ;;
+    esac
+done
+
+install -d "$APPS_DIR"
+sed "s|@SPANPAPER_BIN@|$BIN_DST|g" \
+    "$REPO_DIR/contrib/spanpaper-set-span.desktop" > "$OPENWITH_SPAN_DST"
+sed "s|@SPANPAPER_BIN@|$BIN_DST|g" \
+    "$REPO_DIR/contrib/spanpaper-set-side.desktop" > "$OPENWITH_SIDE_DST"
+chmod 644 "$OPENWITH_SPAN_DST" "$OPENWITH_SIDE_DST"
+ok "installed $OPENWITH_SPAN_DST"
+ok "installed $OPENWITH_SIDE_DST"
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database -q "$APPS_DIR" 2>/dev/null || true
+    ok "refreshed MIME cache (update-desktop-database)"
+else
+    warn "update-desktop-database not found — entries may take effect after re-login"
+fi
+
+# 2. Re-pin captured defaults. If we displaced a real prior default,
+# put it back. If the MIME type had no prior default and we became the
+# default, warn but don't guess a replacement — the user will set their
+# own viewer the first time they double-click.
+RESTORED=()
+ORPHANED=()
+for mime in "${SPANPAPER_MIMES[@]}"; do
+    current="$(xdg-mime query default "$mime" 2>/dev/null || true)"
+    case "$current" in
+        spanpaper-set-*)
+            prior="${PRIOR_DEFAULTS[$mime]:-}"
+            if [[ -n "$prior" ]]; then
+                xdg-mime default "$prior" "$mime" 2>/dev/null && \
+                    RESTORED+=("$mime → $prior")
+            else
+                ORPHANED+=("$mime")
+            fi
+            ;;
+    esac
+done
+if (( ${#RESTORED[@]} )); then
+    ok "restored ${#RESTORED[@]} default(s) we would have displaced"
+    for line in "${RESTORED[@]}"; do
+        printf "       %s%s%s\n" "$C_DIM" "$line" "$C_RST"
+    done
+fi
+if (( ${#ORPHANED[@]} )); then
+    warn "no prior default existed for these types — spanpaper is now their default:"
+    for m in "${ORPHANED[@]}"; do
+        printf "       %s%s%s\n" "$C_DIM" "$m" "$C_RST"
+    done
+    warn "pick a viewer with: xdg-mime default <app>.desktop <mimetype>"
+    warn "or right-click a file → Open With → set a different default."
+fi
 
 # ---- 6. PATH hint ------------------------------------------------------------
 

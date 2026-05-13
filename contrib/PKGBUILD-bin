@@ -48,6 +48,15 @@ package() {
         > "$pkgdir/usr/share/spanpaper/autostart/spanpaper.desktop"
     chmod 644 "$pkgdir/usr/share/spanpaper/autostart/spanpaper.desktop"
 
+    # "Open With" entries for file-manager right-click → set as span/side.
+    install -d "$pkgdir/usr/share/applications"
+    for slot in span side; do
+        sed "s|@SPANPAPER_BIN@|/usr/bin/spanpaper|g" \
+            "contrib/spanpaper-set-$slot.desktop" \
+            > "$pkgdir/usr/share/applications/spanpaper-set-$slot.desktop"
+        chmod 644 "$pkgdir/usr/share/applications/spanpaper-set-$slot.desktop"
+    done
+
     install -Dm644 README.md "$pkgdir/usr/share/doc/$_pkgname/README.md"
     install -Dm644 LICENSE   "$pkgdir/usr/share/licenses/$_pkgname/LICENSE"
 }
