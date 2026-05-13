@@ -31,6 +31,18 @@ pub enum Cmd {
     Status,
     /// Print the Wayland outputs spanpaper sees and exit.
     Outputs,
+    /// Wire user-level autostart: writes ~/.config/autostart/spanpaper.desktop
+    /// (always) and ~/.config/autostart/spanpaper-tray.desktop (when the tray
+    /// binary lives alongside the daemon). Idempotent.
+    Install(InstallArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct InstallArgs {
+    /// Also start the daemon (and tray, if installed) now, instead of
+    /// waiting for the next login.
+    #[arg(long)]
+    pub start: bool,
 }
 
 #[derive(Args, Debug)]
@@ -96,7 +108,131 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         }
         Cmd::Status => cmd_status(),
         Cmd::Outputs => cmd_outputs(),
+        Cmd::Install(a) => cmd_install(a),
     }
+}
+
+fn cmd_install(a: InstallArgs) -> Result<()> {
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+
+    let exe = std::env::current_exe().context("locate current_exe")?;
+    let exe_str = exe.to_string_lossy();
+    let exe_dir = exe.parent().context("exe has no parent dir")?;
+    let tray_exe = exe_dir.join("spanpaper-tray");
+
+    let autostart_dir = dirs::config_dir()
+        .context("XDG_CONFIG_HOME not set")?
+        .join("autostart");
+    std::fs::create_dir_all(&autostart_dir)
+        .with_context(|| format!("mkdir {}", autostart_dir.display()))?;
+
+    // Daemon autostart entry. Mirrors contrib/spanpaper.desktop but
+    // generated inline so we don't depend on /usr/share/spanpaper/
+    // being present (lets `spanpaper install` work in source-install
+    // setups too, not just pacman ones).
+    let daemon_desktop = format!(
+        "[Desktop Entry]\n\
+         Type=Application\n\
+         Name=spanpaper\n\
+         Comment=Spanning video wallpaper for Wayland\n\
+         Exec={exe_str} start --background\n\
+         Terminal=false\n\
+         Categories=Utility;\n\
+         X-GNOME-Autostart-enabled=true\n\
+         NoDisplay=true\n"
+    );
+    let daemon_dst = autostart_dir.join("spanpaper.desktop");
+    write_autostart(&daemon_dst, &daemon_desktop)?;
+    println!("wrote {}", daemon_dst.display());
+
+    // Tray entry — only when the binary is actually present next to
+    // the daemon (i.e. installed via pacman or `setup.sh --with-tray`).
+    let tray_present = tray_exe.is_file();
+    if tray_present {
+        let tray_str = tray_exe.to_string_lossy();
+        let tray_desktop = format!(
+            "[Desktop Entry]\n\
+             Type=Application\n\
+             Name=spanpaper tray\n\
+             Comment=Tray applet for spanpaper — panel icon + layout palette\n\
+             Exec={tray_str}\n\
+             Icon=preferences-desktop-wallpaper\n\
+             Terminal=false\n\
+             Categories=Utility;\n\
+             X-GNOME-Autostart-enabled=true\n\
+             NoDisplay=true\n"
+        );
+        let tray_dst = autostart_dir.join("spanpaper-tray.desktop");
+        write_autostart(&tray_dst, &tray_desktop)?;
+        println!("wrote {}", tray_dst.display());
+    } else {
+        println!(
+            "note: spanpaper-tray not found alongside this binary — skipping tray autostart.\n\
+             (Tray is shipped with the pacman package and via `setup.sh --with-tray`.)"
+        );
+    }
+
+    if a.start {
+        // Daemon: skip spawn if one's already running (avoids the
+        // duplicate-child + immediate-exit dance against the
+        // "daemon already running" guard).
+        match daemon::current_pid() {
+            Ok(pid) => println!("daemon already running (pid {pid}) — skipping start"),
+            Err(_) => {
+                if let Err(e) = daemon::spawn_background() {
+                    tracing::warn!("spawn daemon: {e:#}");
+                }
+            }
+        }
+
+        if tray_present {
+            // Same idea for the tray. ksni registers a unique D-Bus
+            // name per process; spawning a second one gives the user
+            // two icons in the panel. Cheapest reliable check:
+            // pgrep -x spanpaper-tray.
+            let tray_running = Command::new("pgrep")
+                .args(["-x", "spanpaper-tray"])
+                .stdout(Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            if tray_running {
+                println!("spanpaper-tray already running — skipping start");
+            } else {
+                let res = unsafe {
+                    Command::new(&tray_exe)
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .pre_exec(|| {
+                            nix::unistd::setsid().ok();
+                            Ok(())
+                        })
+                        .spawn()
+                };
+                match res {
+                    Ok(child) => println!("started spanpaper-tray (pid {})", child.id()),
+                    Err(e) => tracing::warn!("spawn tray: {e}"),
+                }
+            }
+        }
+    } else {
+        println!();
+        println!("autostart will run at next login.");
+        println!("to start now without re-logging in, run:");
+        println!("  spanpaper install --start");
+    }
+    Ok(())
+}
+
+fn write_autostart(path: &std::path::Path, content: &str) -> Result<()> {
+    let tmp = path.with_extension("desktop.tmp");
+    std::fs::write(&tmp, content)
+        .with_context(|| format!("write {}", tmp.display()))?;
+    std::fs::rename(&tmp, path)
+        .with_context(|| format!("rename to {}", path.display()))?;
+    Ok(())
 }
 
 fn cmd_set(a: SetArgs) -> Result<()> {

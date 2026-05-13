@@ -30,10 +30,19 @@ clone, no Rust toolchain, no compile:
 
 ```bash
 # Substitute the latest version — check the Releases page.
-VERSION=0.3.0 PKGREL=1
+VERSION=0.3.1 PKGREL=1
 curl -LO "https://github.com/imcmurray/spanpaper/releases/download/v$VERSION/spanpaper-bin-$VERSION-$PKGREL-x86_64.pkg.tar.zst"
 sudo pacman -U "spanpaper-bin-$VERSION-$PKGREL-x86_64.pkg.tar.zst"
+spanpaper install --start
 ```
+
+Three commands; the third (`spanpaper install --start`) wires
+user-level autostart entries to `~/.config/autostart/spanpaper.desktop`
+and `~/.config/autostart/spanpaper-tray.desktop`, then launches both
+right away so you don't need to log out and back in. Re-running it is
+idempotent — the autostart entries get rewritten, the daemon + tray
+are skipped if they're already running. Drop the `--start` flag to
+wire autostart only.
 
 Pacman pulls every runtime dep (`mpvpaper`, `swaybg`, `gtk4`,
 `gtk4-layer-shell`) and installs both binaries:
@@ -45,7 +54,8 @@ Pacman pulls every runtime dep (`mpvpaper`, `swaybg`, `gtk4`,
 Plus a (not-enabled) systemd `--user` unit at
 `/usr/lib/systemd/user/spanpaper.service` and sample XDG autostart
 entries at `/usr/share/spanpaper/autostart/spanpaper{,-tray}.desktop`
-that you can copy into `~/.config/autostart/` to start at login.
+that `spanpaper install` reads from (and that you can copy into
+`~/.config/autostart/` by hand if you prefer).
 Uninstall is `sudo pacman -R spanpaper-bin`.
 
 ### Any wlroots Wayland distro — build from source
@@ -327,6 +337,10 @@ spanpaper set --no-audio       # mute (default)
 # or installed via the prebuilt pacman package)
 spanpaper-tray                 # foreground (panel icon + layout palette)
 spanpaper-tray &               # background — usual launch pattern
+
+# Autostart wiring (writes ~/.config/autostart/spanpaper{,-tray}.desktop)
+spanpaper install              # just wire autostart; takes effect at next login
+spanpaper install --start      # wire autostart AND launch daemon + tray now
 ```
 
 ## Picking / encoding source content
