@@ -39,6 +39,25 @@ pub enum Cmd {
 
 #[derive(Args, Debug)]
 pub struct InstallArgs {
+    /// Where to install autostart for the DAEMON. Values:
+    ///   xdg     — `~/.config/autostart/spanpaper.desktop`.
+    ///             Works on every XDG-compliant session, including
+    ///             Budgie. This is the safe default.
+    ///   systemd — `~/.config/systemd/user/spanpaper.service` enabled
+    ///             via `systemctl --user`. Better semantics
+    ///             (restart-on-failure, journald logs), but the unit
+    ///             is gated on `graphical-session.target` +
+    ///             `WAYLAND_DISPLAY`, which Budgie's session does NOT
+    ///             activate / import — pick xdg there.
+    ///   both    — install both. Redundant but harmless; useful when
+    ///             testing autostart behaviour across sessions.
+    ///
+    /// The tray (when present) always uses xdg — no service file is
+    /// shipped for it, and restart-on-failure isn't important for the
+    /// UI applet.
+    #[arg(long, value_name = "MODE", default_value = "xdg")]
+    pub method: String,
+
     /// Also start the daemon (and tray, if installed) now, instead of
     /// waiting for the next login.
     #[arg(long)]
@@ -121,34 +140,90 @@ fn cmd_install(a: InstallArgs) -> Result<()> {
     let exe_dir = exe.parent().context("exe has no parent dir")?;
     let tray_exe = exe_dir.join("spanpaper-tray");
 
-    let autostart_dir = dirs::config_dir()
-        .context("XDG_CONFIG_HOME not set")?
-        .join("autostart");
-    std::fs::create_dir_all(&autostart_dir)
-        .with_context(|| format!("mkdir {}", autostart_dir.display()))?;
+    let want_xdg = matches!(a.method.as_str(), "xdg" | "both");
+    let want_systemd = matches!(a.method.as_str(), "systemd" | "both");
+    if !want_xdg && !want_systemd {
+        anyhow::bail!(
+            "--method must be xdg, systemd, or both (got {:?})",
+            a.method
+        );
+    }
 
-    // Daemon autostart entry. Mirrors contrib/spanpaper.desktop but
-    // generated inline so we don't depend on /usr/share/spanpaper/
-    // being present (lets `spanpaper install` work in source-install
-    // setups too, not just pacman ones).
-    let daemon_desktop = format!(
-        "[Desktop Entry]\n\
-         Type=Application\n\
-         Name=spanpaper\n\
-         Comment=Spanning video wallpaper for Wayland\n\
-         Exec={exe_str} start --background\n\
-         Terminal=false\n\
-         Categories=Utility;\n\
-         X-GNOME-Autostart-enabled=true\n\
-         NoDisplay=true\n"
-    );
-    let daemon_dst = autostart_dir.join("spanpaper.desktop");
-    write_autostart(&daemon_dst, &daemon_desktop)?;
-    println!("wrote {}", daemon_dst.display());
+    let config_dir = dirs::config_dir().context("XDG_CONFIG_HOME not set")?;
+    let autostart_dir = config_dir.join("autostart");
+    let systemd_user_dir = config_dir.join("systemd").join("user");
 
-    // Tray entry — only when the binary is actually present next to
-    // the daemon (i.e. installed via pacman or `setup.sh --with-tray`).
+    if want_xdg {
+        std::fs::create_dir_all(&autostart_dir)
+            .with_context(|| format!("mkdir {}", autostart_dir.display()))?;
+    }
+    if want_systemd {
+        std::fs::create_dir_all(&systemd_user_dir)
+            .with_context(|| format!("mkdir {}", systemd_user_dir.display()))?;
+    }
+
+    // ---- Daemon autostart ----------------------------------------------
+    if want_xdg {
+        // Mirrors contrib/spanpaper.desktop but generated inline so we
+        // don't depend on /usr/share/spanpaper/ being present (lets
+        // `spanpaper install` work in source-install setups too, not
+        // just pacman ones).
+        let daemon_desktop = format!(
+            "[Desktop Entry]\n\
+             Type=Application\n\
+             Name=spanpaper\n\
+             Comment=Spanning video wallpaper for Wayland\n\
+             Exec={exe_str} start --background\n\
+             Terminal=false\n\
+             Categories=Utility;\n\
+             X-GNOME-Autostart-enabled=true\n\
+             NoDisplay=true\n"
+        );
+        let daemon_dst = autostart_dir.join("spanpaper.desktop");
+        write_autostart(&daemon_dst, &daemon_desktop)?;
+        println!("wrote {}", daemon_dst.display());
+    }
+    if want_systemd {
+        // systemd --user unit. Mirrors contrib/spanpaper.service with
+        // the @SPANPAPER_BIN@ placeholder already substituted.
+        let unit = format!(
+            "[Unit]\n\
+             Description=spanpaper — spanning video wallpaper for Wayland\n\
+             PartOf=graphical-session.target\n\
+             After=graphical-session.target\n\
+             ConditionEnvironment=WAYLAND_DISPLAY\n\
+             \n\
+             [Service]\n\
+             Type=simple\n\
+             ExecStart={exe_str} start\n\
+             Restart=on-failure\n\
+             RestartSec=2\n\
+             \n\
+             [Install]\n\
+             WantedBy=graphical-session.target\n"
+        );
+        let unit_dst = systemd_user_dir.join("spanpaper.service");
+        write_autostart(&unit_dst, &unit)?;
+        println!("wrote {}", unit_dst.display());
+
+        // Wire systemd: daemon-reload picks up the new unit; enable
+        // (without --now) sets WantedBy symlinks. `--start` below
+        // calls `start` on it; otherwise it kicks in at next login
+        // (or whenever graphical-session.target activates).
+        run_systemctl(&["daemon-reload"])?;
+        run_systemctl(&["enable", "spanpaper.service"])?;
+        println!("enabled spanpaper.service (systemctl --user)");
+    }
+
+    // ---- Tray autostart (always XDG) -----------------------------------
+    // No service file is shipped for the tray — restart-on-failure
+    // isn't important for a UI applet, and shipping a unit just to
+    // keep methods symmetric isn't worth the maintenance.
     let tray_present = tray_exe.is_file();
+    if tray_present {
+        std::fs::create_dir_all(&autostart_dir)
+            .with_context(|| format!("mkdir {}", autostart_dir.display()))?;
+    }
     if tray_present {
         let tray_str = tray_exe.to_string_lossy();
         let tray_desktop = format!(
@@ -174,13 +249,21 @@ fn cmd_install(a: InstallArgs) -> Result<()> {
     }
 
     if a.start {
-        // Daemon: skip spawn if one's already running (avoids the
-        // duplicate-child + immediate-exit dance against the
-        // "daemon already running" guard).
+        // Daemon: skip start if one's already running. Otherwise pick
+        // the start path matching the autostart method we just wrote:
+        //   * systemd → `systemctl --user start spanpaper.service`
+        //     so the service is alive *under* its supervisor, matching
+        //     the restart-on-failure semantics the user opted into.
+        //   * xdg / xdg+systemd: spawn detached the old way. (On the
+        //     "both" path, the systemd unit also got enabled and will
+        //     take over from the next login.)
         match daemon::current_pid() {
             Ok(pid) => println!("daemon already running (pid {pid}) — skipping start"),
             Err(_) => {
-                if let Err(e) = daemon::spawn_background() {
+                if want_systemd && !want_xdg {
+                    run_systemctl(&["start", "spanpaper.service"])?;
+                    println!("started spanpaper.service (systemctl --user)");
+                } else if let Err(e) = daemon::spawn_background() {
                     tracing::warn!("spawn daemon: {e:#}");
                 }
             }
@@ -227,11 +310,29 @@ fn cmd_install(a: InstallArgs) -> Result<()> {
 }
 
 fn write_autostart(path: &std::path::Path, content: &str) -> Result<()> {
-    let tmp = path.with_extension("desktop.tmp");
+    // tmp-extension chosen to be benign for both .desktop and .service.
+    let tmp = path.with_extension(
+        format!("{}.tmp", path.extension().and_then(|e| e.to_str()).unwrap_or("tmp")),
+    );
     std::fs::write(&tmp, content)
         .with_context(|| format!("write {}", tmp.display()))?;
     std::fs::rename(&tmp, path)
         .with_context(|| format!("rename to {}", path.display()))?;
+    Ok(())
+}
+
+/// Run `systemctl --user <args>`, surfacing the exit status as an error
+/// when it fails so the caller knows the operation didn't take.
+fn run_systemctl(args: &[&str]) -> Result<()> {
+    use std::process::Command;
+    let status = Command::new("systemctl")
+        .arg("--user")
+        .args(args)
+        .status()
+        .with_context(|| format!("invoke systemctl --user {args:?}"))?;
+    if !status.success() {
+        anyhow::bail!("systemctl --user {:?} exited {}", args, status);
+    }
     Ok(())
 }
 

@@ -339,9 +339,22 @@ spanpaper-tray                 # foreground (panel icon + layout palette)
 spanpaper-tray &               # background — usual launch pattern
 
 # Autostart wiring (writes ~/.config/autostart/spanpaper{,-tray}.desktop)
-spanpaper install              # just wire autostart; takes effect at next login
-spanpaper install --start      # wire autostart AND launch daemon + tray now
+spanpaper install                           # XDG autostart for daemon + tray
+spanpaper install --start                   # …also launch daemon + tray now
+spanpaper install --method=systemd          # systemd --user unit instead of XDG for the daemon
+spanpaper install --method=both             # both XDG and systemd (tray is always XDG)
 ```
+
+`--method=xdg` (default) writes
+`~/.config/autostart/spanpaper.desktop`; works everywhere including
+Budgie. `--method=systemd` writes
+`~/.config/systemd/user/spanpaper.service` and runs `systemctl --user
+enable spanpaper.service` — better semantics (restart-on-failure +
+journald logs via `journalctl --user -u spanpaper -f`), but the unit
+gates on `graphical-session.target` + `WAYLAND_DISPLAY`, both of
+which Budgie's session does NOT activate/import. Pick the default
+(`xdg`) on Budgie; pick `systemd` on Sway / Hyprland / river / KDE
+Plasma Wayland / anything else that activates `graphical-session.target`.
 
 ## Picking / encoding source content
 
