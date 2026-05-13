@@ -5,6 +5,7 @@
 mod cli;
 mod config;
 mod daemon;
+mod media;
 mod outputs;
 mod workers;
 

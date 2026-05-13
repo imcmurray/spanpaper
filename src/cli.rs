@@ -1,12 +1,8 @@
 // CLI surface: clap definitions and subcommand dispatch.
 //
-// Subcommands:
-//   set     — update config (paths, audio, span/image outputs) and reload daemon
-//   start   — run as daemon (foreground; use --background to fork)
-//   stop    — terminate running daemon
-//   restart — stop + start
-//   status  — show daemon state, config, detected outputs
-//   outputs — print detected Wayland outputs and exit
+// Flag names use `span` / `side` semantics; old aliases (`--video`,
+// `--left-image`, `--image-output`, `--image-mode`) are kept so scripts and
+// muscle memory keep working.
 
 use crate::{config::Config, daemon, outputs};
 use anyhow::{Context, Result};
@@ -17,7 +13,7 @@ use std::path::PathBuf;
 #[command(
     name = "spanpaper",
     version,
-    about = "Single-MP4 video wallpaper spanning stacked Wayland monitors",
+    about = "Single-MP4 (or image) wallpaper spanning stacked Wayland monitors",
     long_about = None,
 )]
 pub struct Cli {
@@ -43,15 +39,15 @@ pub enum Cmd {
 
 #[derive(Args, Debug)]
 pub struct SetArgs {
-    /// Path to the source MP4 to span across the vertical-stacked monitors.
-    #[arg(long, value_name = "PATH")]
-    pub video: Option<PathBuf>,
+    /// Content for the spanned monitor group. Image or video — auto-detected.
+    #[arg(long, visible_alias = "video", value_name = "PATH")]
+    pub span: Option<PathBuf>,
 
-    /// Path to the static image for the side monitor (DP-5 by default).
-    #[arg(long, value_name = "PATH")]
-    pub left_image: Option<PathBuf>,
+    /// Content for the side monitor. Image or video — auto-detected.
+    #[arg(long, visible_aliases = ["left-image", "image"], value_name = "PATH")]
+    pub side: Option<PathBuf>,
 
-    /// Unmute video audio. Defaults to muted.
+    /// Unmute video audio. Defaults to muted. Only relevant when --span is a video.
     #[arg(long)]
     pub audio: bool,
 
@@ -59,18 +55,22 @@ pub struct SetArgs {
     #[arg(long, conflicts_with = "audio")]
     pub no_audio: bool,
 
-    /// Comma-separated output names to span the video over, top→bottom.
+    /// Comma-separated output names to span over, top→bottom (or left→right).
     /// Example: --span-outputs HDMI-A-4,DP-6
     #[arg(long, value_name = "NAMES", value_delimiter = ',')]
     pub span_outputs: Option<Vec<String>>,
 
-    /// Output name to display the static image on.
-    #[arg(long, value_name = "NAME")]
-    pub image_output: Option<String>,
+    /// Output name to display the side content on.
+    #[arg(long, visible_alias = "image-output", value_name = "NAME")]
+    pub side_output: Option<String>,
 
-    /// Fit mode for the static image: fill | fit | stretch | center | tile.
-    #[arg(long, value_name = "MODE")]
-    pub image_mode: Option<String>,
+    /// Fit mode for the side content when it's an image: fill | fit | stretch | center | tile.
+    #[arg(long, visible_alias = "image-mode", value_name = "MODE")]
+    pub side_mode: Option<String>,
+
+    /// Fit mode for the span content: crop | fit | stretch.
+    #[arg(long, visible_alias = "video-fit", value_name = "MODE")]
+    pub span_fit: Option<String>,
 
     /// Don't reload the running daemon after writing config.
     #[arg(long)]
@@ -105,27 +105,18 @@ pub fn dispatch(cli: Cli) -> Result<()> {
 fn cmd_set(a: SetArgs) -> Result<()> {
     let mut cfg = Config::load_or_default().context("loading config")?;
 
-    if let Some(v) = a.video {
-        cfg.video = Some(canonicalize_user_path(&v)?);
+    if let Some(v) = a.span {
+        cfg.span = Some(canonicalize_user_path(&v)?);
     }
-    if let Some(i) = a.left_image {
-        cfg.left_image = Some(canonicalize_user_path(&i)?);
+    if let Some(i) = a.side {
+        cfg.side = Some(canonicalize_user_path(&i)?);
     }
-    if a.audio {
-        cfg.audio = true;
-    }
-    if a.no_audio {
-        cfg.audio = false;
-    }
-    if let Some(s) = a.span_outputs {
-        cfg.span_outputs = s;
-    }
-    if let Some(o) = a.image_output {
-        cfg.image_output = Some(o);
-    }
-    if let Some(m) = a.image_mode {
-        cfg.image_mode = m;
-    }
+    if a.audio   { cfg.audio = true;  }
+    if a.no_audio{ cfg.audio = false; }
+    if let Some(s) = a.span_outputs { cfg.span_outputs = s; }
+    if let Some(o) = a.side_output  { cfg.side_output = Some(o); }
+    if let Some(m) = a.side_mode    { cfg.side_mode = m; }
+    if let Some(f) = a.span_fit     { cfg.span_fit = f; }
 
     cfg.save().context("saving config")?;
     tracing::info!("config saved to {}", Config::path()?.display());
@@ -144,20 +135,24 @@ fn cmd_set(a: SetArgs) -> Result<()> {
 
 fn cmd_status() -> Result<()> {
     let pid = daemon::current_pid().ok();
-    println!("daemon: {}", match pid {
-        Some(p) => format!("running (pid {p})"),
-        None    => "not running".into(),
-    });
+    println!(
+        "daemon: {}",
+        match pid {
+            Some(p) => format!("running (pid {p})"),
+            None    => "not running".into(),
+        }
+    );
 
     match Config::load() {
         Ok(cfg) => {
             println!("config: {}", Config::path()?.display());
-            println!("  video        = {:?}", cfg.video);
-            println!("  left_image   = {:?}", cfg.left_image);
+            println!("  span         = {:?}", cfg.span);
+            println!("  side         = {:?}", cfg.side);
             println!("  audio        = {}", cfg.audio);
             println!("  span_outputs = {:?}", cfg.span_outputs);
-            println!("  image_output = {:?}", cfg.image_output);
-            println!("  image_mode   = {}", cfg.image_mode);
+            println!("  side_output  = {:?}", cfg.side_output);
+            println!("  side_mode    = {}", cfg.side_mode);
+            println!("  span_fit     = {}", cfg.span_fit);
         }
         Err(e) => println!("config: <missing or invalid> ({e})"),
     }
@@ -188,9 +183,9 @@ fn cmd_outputs() -> Result<()> {
     Ok(())
 }
 
-/// Expand ~ / env vars and canonicalize to absolute. We don't require the file
-/// to exist (config may be written before files are placed), so we fall back to
-/// the absolute form if canonicalize() fails.
+/// Expand ~ / env vars and canonicalize to absolute. We don't require the
+/// file to exist (config may be written before files are placed), so we fall
+/// back to the absolute form if canonicalize() fails.
 fn canonicalize_user_path(p: &std::path::Path) -> Result<PathBuf> {
     let expanded = shellexpand::full(&p.to_string_lossy())
         .map_err(|e| anyhow::anyhow!("path expansion: {e}"))?

@@ -1,5 +1,9 @@
 // Persistent config at $XDG_CONFIG_HOME/spanpaper/config.toml
 // (typically ~/.config/spanpaper/config.toml).
+//
+// Field names use `span` / `side` semantics now; older configs that wrote
+// `video` / `left_image` / `image_output` / `image_mode` / `video_fit` are
+// still accepted via serde aliases and silently migrated on next save.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -8,34 +12,37 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::media::MediaKind;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    /// Single source MP4 to span across `span_outputs`, top → bottom.
-    #[serde(default)]
-    pub video: Option<PathBuf>,
+    /// Content for the span outputs. Image or video — auto-detected.
+    #[serde(default, alias = "video")]
+    pub span: Option<PathBuf>,
 
-    /// Static image displayed on `image_output`.
-    #[serde(default)]
-    pub left_image: Option<PathBuf>,
+    /// Content for the side output (DP-5 by default). Image or video.
+    #[serde(default, alias = "left_image")]
+    pub side: Option<PathBuf>,
 
-    /// Unmute the video. Default: muted.
+    /// Unmute the video. Only meaningful when `span` is a video. Default: muted.
     #[serde(default)]
     pub audio: bool,
 
-    /// Outputs that share the video, ordered top → bottom (or left → right).
+    /// Outputs that share the span content, ordered top → bottom (or left → right).
     /// Default = your stacked rig: HDMI-A-4 on top, DP-6 on bottom.
     #[serde(default = "default_span_outputs")]
     pub span_outputs: Vec<String>,
 
-    /// Output that gets the static image.
-    #[serde(default = "default_image_output")]
-    pub image_output: Option<String>,
+    /// Output that gets the side content.
+    #[serde(default = "default_side_output", alias = "image_output")]
+    pub side_output: Option<String>,
 
-    /// Image fit mode passed to swaybg (fill|fit|stretch|center|tile).
-    #[serde(default = "default_image_mode")]
-    pub image_mode: String,
+    /// Fit mode for the side content when it's an image (passed to swaybg).
+    /// Values: fill | fit | stretch | center | tile.
+    #[serde(default = "default_side_mode", alias = "image_mode")]
+    pub side_mode: String,
 
-    /// Direction of the span. "vertical" = top/bottom (your setup);
+    /// Direction of the span. "vertical" = top/bottom (default);
     /// "horizontal" = left/right.
     #[serde(default = "default_span_direction")]
     pub span_direction: SpanDirection,
@@ -48,8 +55,8 @@ pub struct Config {
     /// `crop`   = panscan=1.0, zoom-fill, may clip sides (recommended)
     /// `fit`    = letterbox, may show black bars
     /// `stretch`= ignore aspect (--keepaspect=no)
-    #[serde(default = "default_video_fit")]
-    pub video_fit: String,
+    #[serde(default = "default_span_fit", alias = "video_fit")]
+    pub span_fit: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -62,23 +69,23 @@ pub enum SpanDirection {
 fn default_span_outputs() -> Vec<String> {
     vec!["HDMI-A-4".into(), "DP-6".into()]
 }
-fn default_image_output() -> Option<String> { Some("DP-5".into()) }
-fn default_image_mode() -> String { "fill".into() }
+fn default_side_output() -> Option<String> { Some("DP-5".into()) }
+fn default_side_mode() -> String { "fill".into() }
 fn default_span_direction() -> SpanDirection { SpanDirection::Vertical }
-fn default_video_fit() -> String { "crop".into() }
+fn default_span_fit() -> String { "crop".into() }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            video: None,
-            left_image: None,
+            span: None,
+            side: None,
             audio: false,
             span_outputs: default_span_outputs(),
-            image_output: default_image_output(),
-            image_mode: default_image_mode(),
+            side_output: default_side_output(),
+            side_mode: default_side_mode(),
             span_direction: default_span_direction(),
             extra_mpv_options: vec![],
-            video_fit: default_video_fit(),
+            span_fit: default_span_fit(),
         }
     }
 }
@@ -121,11 +128,21 @@ impl Config {
     }
 
     pub fn validate(&self) -> Result<()> {
-        let v = self.video.as_deref().context("config.video is unset; run `spanpaper set --video PATH`")?;
-        ensure_file(v, "video")?;
-        if let Some(img) = &self.left_image {
-            ensure_file(img, "left_image")?;
+        let span = self.span.as_deref().context(
+            "config.span is unset; run `spanpaper set --span PATH` (any image or video)",
+        )?;
+        ensure_file(span, "span")?;
+        MediaKind::detect(span).with_context(|| {
+            format!("could not classify span content: {}", span.display())
+        })?;
+
+        if let Some(side) = &self.side {
+            ensure_file(side, "side")?;
+            MediaKind::detect(side).with_context(|| {
+                format!("could not classify side content: {}", side.display())
+            })?;
         }
+
         if self.span_outputs.is_empty() {
             anyhow::bail!("config.span_outputs is empty");
         }

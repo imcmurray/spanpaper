@@ -30,9 +30,22 @@ Then point it at content:
 
 ```bash
 spanpaper set \
-  --video      ~/Wallpapers/span-1920x2160.mp4 \
-  --left-image ~/Wallpapers/side.jpg
+  --span ~/Wallpapers/anything.mp4-or-png \
+  --side ~/Wallpapers/anything.jpg-or-mp4
 ```
+
+Both `--span` and `--side` accept **either an image or a video** — content
+type is auto-detected from extension (with `file(1)` MIME fallback) and the
+right backend is chosen for you:
+
+| You provide | Span outputs (stacked) | Side output |
+|---|---|---|
+| Video (`.mp4`, `.mkv`, `.webm`, …) | mpvpaper × N, top/bottom crop | mpvpaper × 1, no crop |
+| Image (`.jpg`, `.png`, `.webp`, …) | mpvpaper × N, held as still frame, top/bottom crop | swaybg (lighter than libmpv for a still) |
+
+Old `--video` / `--left-image` flags and old config field names (`video`,
+`left_image`, `image_output`, `image_mode`, `video_fit`) are still
+accepted as aliases and silently migrated on the next save.
 
 `setup.sh --help` lists every flag. The sections below explain what it
 automates.
@@ -87,29 +100,29 @@ esac
 ## Configure
 
 Config lives at `~/.config/spanpaper/config.toml`. Edit it directly, or use
-the `set` subcommand (validates paths, atomically rewrites the file,
-SIGHUPs a running daemon for hot reload):
+the `set` subcommand (validates paths, auto-detects media type, atomically
+rewrites the file, SIGHUPs a running daemon for hot reload):
 
 ```bash
 spanpaper set \
-  --video       ~/Wallpapers/span-1920x2160.mp4 \
-  --left-image  ~/Wallpapers/forest.jpg \
+  --span         ~/Wallpapers/anything.mp4-or-jpg \
+  --side         ~/Wallpapers/anything.jpg-or-mp4 \
   --span-outputs HDMI-A-4,DP-6 \
-  --image-output DP-5 \
-  --image-mode fill
+  --side-output  DP-5 \
+  --side-mode    fill
 ```
 
 Example written config:
 
 ```toml
-video        = "/home/you/Wallpapers/sky-1920x2160.mp4"
-left_image   = "/home/you/Wallpapers/forest.jpg"
+span         = "/home/you/Wallpapers/sky-1920x2160.mp4"   # image or video
+side         = "/home/you/Wallpapers/forest.jpg"          # image or video
 audio        = false
 span_outputs = ["HDMI-A-4", "DP-6"]
-image_output = "DP-5"
-image_mode   = "fill"              # swaybg: fill | fit | stretch | center | tile
+side_output  = "DP-5"
+side_mode    = "fill"              # swaybg: fill | fit | stretch | center | tile
 span_direction = "vertical"        # "vertical" stacks | "horizontal" side-by-side
-video_fit    = "crop"              # crop (zoom-fill) | fit (letterbox) | stretch
+span_fit     = "crop"              # crop (zoom-fill) | fit (letterbox) | stretch
 extra_mpv_options = []             # raw mpv opts appended to every video worker
 ```
 
@@ -171,8 +184,10 @@ spanpaper start --background   # detached
 spanpaper stop
 spanpaper restart
 
-spanpaper set --video ~/foo.mp4    # rewrite config + SIGHUP running daemon
-spanpaper set --video ~/foo.mp4 --no-reload   # rewrite only
+spanpaper set --span ~/foo.mp4    # rewrite config + SIGHUP running daemon
+spanpaper set --span ~/foo.png    # auto-detected as image, holds as still
+spanpaper set --side ~/bar.mp4    # video on DP-5; mpvpaper instead of swaybg
+spanpaper set --span ~/foo.mp4 --no-reload    # rewrite only
 ```
 
 ## Picking / encoding a source video
@@ -221,7 +236,8 @@ spanpaper/
 └── src/
     ├── main.rs                tracing init + CLI dispatch
     ├── cli.rs                 clap definitions
-    ├── config.rs              TOML load/save (atomic write)
+    ├── config.rs              TOML load/save (atomic write, schema migrations)
+    ├── media.rs               image-vs-video content-type detection
     ├── outputs.rs             wl_output + xdg-output enumeration
     ├── workers.rs             mpvpaper / swaybg subprocess plan & supervisors
     └── daemon.rs              pid file, signal handling, supervisor loop

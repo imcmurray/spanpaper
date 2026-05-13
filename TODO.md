@@ -1,19 +1,22 @@
 # spanpaper — outstanding work
 
-## ⏳ Swap the test calibration video for a real spanning MP4
+## ⏳ Swap the test calibration content for real spanning content
+
+`--span` and `--side` both accept images *or* videos — pick whatever you have.
 
 Daemon is currently running the test-asset calibration video/image. When
 you've picked a real spanning MP4 (ideally 1920×2160 to match the
 HDMI-A-4 + DP-6 stack):
 
 ```bash
-# hot-swap the video, keep DP-5 untouched
-spanpaper set --video /path/to/your-real-spanning.mp4
+# hot-swap the span content (image or video), keep DP-5 untouched
+spanpaper set --span /path/to/your-real-content.mp4
+spanpaper set --span /path/to/your-real-content.png   # still image also works
 
 # (or swap both at once)
 spanpaper set \
-  --video      /path/to/your-real-spanning.mp4 \
-  --left-image /path/to/your-real-side.jpg
+  --span /path/to/your-real-content.mp4 \
+  --side /path/to/your-real-side.jpg
 ```
 
 `spanpaper set` writes the new config and sends SIGHUP to the running

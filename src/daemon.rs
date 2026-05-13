@@ -171,7 +171,7 @@ fn start_workers() -> Result<Vec<Worker>> {
 
     let detected = outputs::detect().unwrap_or_default();
     let names: Vec<&str> = detected.iter().map(|o| o.name.as_str()).collect();
-    for want in cfg.span_outputs.iter().chain(cfg.image_output.iter()) {
+    for want in cfg.span_outputs.iter().chain(cfg.side_output.iter()) {
         if !names.iter().any(|n| n == want) {
             tracing::warn!(
                 "configured output {:?} not currently present (have: {:?})",

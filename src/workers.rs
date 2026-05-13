@@ -1,15 +1,19 @@
 // Subprocess supervisors.
 //
-// We spawn one mpvpaper per video output (with a per-monitor crop filter so a
-// single source MP4 is sliced across the stack) and one swaybg for the static
-// image. Each is wrapped in a Worker with a restart-on-crash policy and a
-// graceful-shutdown SIGTERM path.
+// Worker dispatch is driven by `MediaKind` per slot:
 //
-// Why mpvpaper instead of binding libmpv ourselves: mpvpaper already plumbs
-// libmpv's render API into an EGL'd wlr-layer-shell surface. It is the
-// upstream-accepted reference for this exact use case. Wrapping it gives us
-// reliable hardware-accelerated playback in a fraction of the code we'd need
-// to write from scratch — and it ships in the Arch repos.
+//   span outputs (always mpvpaper, with per-monitor crop):
+//     · Video → libmpv decode + crop
+//     · Image → libmpv with image-display-duration=inf (single frame held)
+//
+//   side output (one of these, depending on content):
+//     · Image → swaybg (lighter than libmpv for a still)
+//     · Video → mpvpaper, no crop
+//
+// Each worker is wrapped in a `Worker` with a restart-on-crash policy and a
+// graceful-shutdown SIGTERM path. We keep mpvpaper as a subprocess because
+// it's the upstream-accepted reference for libmpv-into-wlr-layer-shell;
+// reimplementing that in-process would be a big and fragile code investment.
 
 use anyhow::{Context, Result};
 use nix::{
@@ -17,12 +21,15 @@ use nix::{
     unistd::Pid,
 };
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     time::{Duration, Instant},
 };
 
-use crate::config::{Config, SpanDirection};
+use crate::{
+    config::{Config, SpanDirection},
+    media::MediaKind,
+};
 
 pub struct Worker {
     pub label: String,
@@ -35,19 +42,20 @@ pub struct Worker {
 
 #[derive(Debug, Clone)]
 pub enum WorkerKind {
-    /// (output, video path, crop spec, audio, fit mode, extra opts)
-    Video {
+    /// mpvpaper handles video OR image. `crop` = None for non-span outputs.
+    Mpv {
         output: String,
-        video: std::path::PathBuf,
-        crop: String,
+        path: PathBuf,
+        crop: Option<String>,
+        media: MediaKind,
         audio: bool,
         fit: String,
         extra: Vec<String>,
     },
-    /// (output, image path, fit mode)
-    Image {
+    /// swaybg for a static image on a single output.
+    Swaybg {
         output: String,
-        image: std::path::PathBuf,
+        path: PathBuf,
         mode: String,
     },
 }
@@ -55,14 +63,14 @@ pub enum WorkerKind {
 impl Worker {
     pub fn spawn(kind: WorkerKind) -> Result<Self> {
         let (label, child) = match &kind {
-            WorkerKind::Video { output, video, crop, audio, fit, extra } => {
-                (format!("video:{output}"),
-                 spawn_video(output, video, crop, *audio, fit, extra)?)
-            }
-            WorkerKind::Image { output, image, mode } => {
-                (format!("image:{output}"),
-                 spawn_image(output, image, mode)?)
-            }
+            WorkerKind::Mpv { output, path, crop, media, audio, fit, extra } => (
+                format!("mpv:{output}"),
+                spawn_mpv(output, path, crop.as_deref(), *media, *audio, fit, extra)?,
+            ),
+            WorkerKind::Swaybg { output, path, mode } => (
+                format!("swaybg:{output}"),
+                spawn_swaybg(output, path, mode)?,
+            ),
         };
         Ok(Self {
             label,
@@ -74,8 +82,7 @@ impl Worker {
     }
 
     /// Returns `Ok(true)` if the worker exited and was successfully restarted.
-    /// Returns `Ok(false)` if the worker is still alive. Errors propagate from
-    /// restart attempts that themselves fail (e.g. binary missing).
+    /// Returns `Ok(false)` if the worker is still alive.
     pub fn poll_and_maybe_restart(&mut self) -> Result<bool> {
         match self.child.try_wait().context("waitpid worker")? {
             None => Ok(false),
@@ -86,8 +93,7 @@ impl Worker {
                     self.label, status, uptime.as_secs_f32()
                 );
 
-                // Window the failure counter: a clean 60s run resets it so
-                // long-lived crashes don't permanently disable the worker.
+                // Window the failure counter so long-lived crashes reset it.
                 if uptime > Duration::from_secs(60) {
                     self.recent_failures = 0;
                 }
@@ -100,7 +106,6 @@ impl Worker {
                     );
                 }
 
-                // Linear backoff, capped at 5s.
                 let backoff = Duration::from_millis(500u64.saturating_mul(self.recent_failures as u64));
                 std::thread::sleep(backoff.min(Duration::from_secs(5)));
 
@@ -135,56 +140,84 @@ impl Worker {
     }
 }
 
-/// Compute the mpv `vf=crop=` expression for the given slice index, total
-/// slices, and direction. Uses `iw`/`ih` so it works regardless of the source
-/// resolution.
+/// Compute the mpv `vf=crop=` expression for slice `index` of `total` along
+/// the span direction. Uses `iw`/`ih` so it works regardless of source size.
 pub fn crop_spec(index: usize, total: usize, dir: SpanDirection) -> String {
     let total = total.max(1) as i32;
     let i = index as i32;
     match dir {
-        SpanDirection::Vertical => {
-            // height divided into `total` horizontal strips, take the i-th.
-            //  crop=W:H:X:Y
-            format!("crop=iw:ih/{t}:0:ih*{i}/{t}", t = total, i = i)
-        }
-        SpanDirection::Horizontal => {
-            format!("crop=iw/{t}:ih:iw*{i}/{t}:0", t = total, i = i)
-        }
+        SpanDirection::Vertical =>
+            format!("crop=iw:ih/{t}:0:ih*{i}/{t}", t = total, i = i),
+        SpanDirection::Horizontal =>
+            format!("crop=iw/{t}:ih:iw*{i}/{t}:0", t = total, i = i),
     }
 }
 
-/// Plan workers for the current config (without spawning them yet).
+/// Plan workers for the current config without spawning them yet. The
+/// content type of each slot is detected here and recorded in the plan, so
+/// the spawn step doesn't need to re-probe disk.
 pub fn plan(cfg: &Config) -> Result<Vec<WorkerKind>> {
     let mut plan = Vec::new();
 
-    let video = cfg.video.as_ref().context("config.video unset")?;
+    let span_path = cfg.span.as_ref().context("config.span unset")?;
+    let span_media = MediaKind::detect(span_path)
+        .with_context(|| format!("classify span content: {}", span_path.display()))?;
+    tracing::info!(
+        "span content: {} ({:?})",
+        span_path.display(), span_media
+    );
+
     let total = cfg.span_outputs.len();
     for (i, out) in cfg.span_outputs.iter().enumerate() {
-        plan.push(WorkerKind::Video {
+        plan.push(WorkerKind::Mpv {
             output: out.clone(),
-            video: video.clone(),
-            crop: crop_spec(i, total, cfg.span_direction),
-            audio: cfg.audio && i == 0, // only one instance produces audio
-            fit: cfg.video_fit.clone(),
+            path: span_path.clone(),
+            crop: Some(crop_spec(i, total, cfg.span_direction)),
+            media: span_media,
+            // Audio only meaningful for video, and only on the first instance.
+            audio: cfg.audio && i == 0 && span_media == MediaKind::Video,
+            fit: cfg.span_fit.clone(),
             extra: cfg.extra_mpv_options.clone(),
         });
     }
 
-    if let (Some(out), Some(img)) = (&cfg.image_output, &cfg.left_image) {
-        plan.push(WorkerKind::Image {
-            output: out.clone(),
-            image: img.clone(),
-            mode: cfg.image_mode.clone(),
-        });
+    if let (Some(out), Some(path)) = (&cfg.side_output, &cfg.side) {
+        let side_media = MediaKind::detect(path)
+            .with_context(|| format!("classify side content: {}", path.display()))?;
+        tracing::info!(
+            "side content: {} ({:?})",
+            path.display(), side_media
+        );
+        match side_media {
+            MediaKind::Image => {
+                plan.push(WorkerKind::Swaybg {
+                    output: out.clone(),
+                    path: path.clone(),
+                    mode: cfg.side_mode.clone(),
+                });
+            }
+            MediaKind::Video => {
+                plan.push(WorkerKind::Mpv {
+                    output: out.clone(),
+                    path: path.clone(),
+                    crop: None,
+                    media: MediaKind::Video,
+                    audio: false,
+                    fit: cfg.span_fit.clone(),
+                    extra: cfg.extra_mpv_options.clone(),
+                });
+            }
+        }
     }
 
     Ok(plan)
 }
 
-fn spawn_video(
+fn spawn_mpv(
     output: &str,
-    video: &Path,
-    crop: &str,
+    path: &Path,
+    crop: Option<&str>,
+    media: MediaKind,
     audio: bool,
     fit: &str,
     extra: &[String],
@@ -192,29 +225,33 @@ fn spawn_video(
     let bin = which::which("mpvpaper")
         .context("`mpvpaper` not found on PATH (install: pacman -S mpvpaper)")?;
 
-    // Build the `-o` mpv-options string. mpvpaper passes this verbatim to mpv,
-    // so we keep it as one space-separated string. Values containing spaces
-    // are not expected here (crop uses `:` and `/`, no whitespace).
     let mut opts: Vec<String> = vec![
         "loop-file=inf".into(),
         "hwdec=auto-safe".into(),
-        format!("vf={crop}"),
     ];
+    if let Some(c) = crop {
+        opts.push(format!("vf={c}"));
+    }
     if !audio {
         opts.push("no-audio".into());
         opts.push("mute=yes".into());
     } else {
         opts.push("volume=100".into());
     }
+    if media == MediaKind::Image {
+        // Hold the single frame forever — mpv's default is 1s and then
+        // playback ends.
+        opts.push("image-display-duration=inf".into());
+        opts.push("loop=inf".into());
+    }
     match fit {
         "stretch" => opts.push("keepaspect=no".into()),
         "fit"     => { /* default mpv behavior; letterboxes */ }
-        "crop" | _ => {
+        _         => {
             opts.push("panscan=1.0".into());
             opts.push("keepaspect=yes".into());
         }
     }
-    // Quiet by default; user gets per-worker stderr only on crashes.
     opts.push("really-quiet=yes".into());
     opts.push("force-window=no".into());
 
@@ -227,17 +264,19 @@ fn spawn_video(
     let mut cmd = Command::new(bin);
     cmd.arg("-o").arg(&opt_str)
        .arg(output)
-       .arg(video)
+       .arg(path)
        .stdin(Stdio::null())
        .stdout(Stdio::null())
        .stderr(Stdio::inherit());
 
-    tracing::info!("spawning video worker: mpvpaper -o {:?} {} {}",
-                   opt_str, output, video.display());
+    tracing::info!(
+        "spawning mpvpaper worker: -o {:?} {} {} ({:?})",
+        opt_str, output, path.display(), media
+    );
     cmd.spawn().context("spawn mpvpaper")
 }
 
-fn spawn_image(output: &str, image: &Path, mode: &str) -> Result<Child> {
+fn spawn_swaybg(output: &str, image: &Path, mode: &str) -> Result<Child> {
     let bin = which::which("swaybg")
         .context("`swaybg` not found on PATH (install: pacman -S swaybg)")?;
 
@@ -249,7 +288,7 @@ fn spawn_image(output: &str, image: &Path, mode: &str) -> Result<Child> {
        .stdout(Stdio::null())
        .stderr(Stdio::inherit());
 
-    tracing::info!("spawning image worker: swaybg -o {} -i {} -m {}",
+    tracing::info!("spawning swaybg worker: -o {} -i {} -m {}",
                    output, image.display(), mode);
     cmd.spawn().context("spawn swaybg")
 }
