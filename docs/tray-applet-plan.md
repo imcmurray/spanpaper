@@ -402,7 +402,29 @@ them is "do everything else first."
      polish can move generation onto a `glib::spawn_future_local`
      task and render a spinner placeholder in the meantime.
 5. **M5 — Drop targets.** Drag-and-drop wired to `spanpaper set`. The
-   moment this lands, the feature is the killer feature. **~½ day.**
+   moment this lands, the feature is the killer feature. **~½ day.** ✅ Done.
+   * `daemon_client::Slot { Span, Side }` + `set_for(slot, path)`
+     shells out to `spanpaper set --span PATH` / `--side PATH`.
+   * Each output Frame in the palette gets a `gtk4::DropTarget`
+     accepting `gio::File`. Drop pulls `.path()` (local files only —
+     non-local Flatpak crossings decline cleanly; M6's portal picker
+     covers those), calls `daemon_client::set_for`, then closes the
+     window so the next left-click brings up a fresh palette with the
+     new thumbnail. End-to-end SIGHUP-reload latency on a drop is
+     ~10 ms.
+   * Polish discovered during user testing:
+     * **Single-instance palette.** Repeatedly left-clicking the tray
+       icon was opening duplicate windows. Now the palette window is
+       tagged `widget_name = "spanpaper-palette"`; `show()` iterates
+       `Application::windows()` and `present()`s the existing one if
+       found, only building a new window when none exists.
+     * **Still-image thumbnails were blank.** The M4 `-ss 0.5`
+       pre-roll seek pushes past EOF on a single-frame PNG/JPG,
+       ffmpeg exits zero with no file written, the cache rename then
+       fails and the popover falls back to resolution text. Fix:
+       drop the seek (the fade-in skip wasn't worth the still-image
+       breakage), and add `-update 1` so the image2 muxer stops
+       warning about the missing sequence pattern.
 6. **M6 — File picker fallback + full menu.** `ashpd` file picker for
    click-to-open, full right-click menu with pause/fit/audio/etc.
    **~1 day.**

@@ -8,11 +8,15 @@
 //!   * Cache entry is treated as stale when the source's mtime is
 //!     newer than the cache's mtime — covers the "user edited the
 //!     file in place" case.
-//!   * A single `ffmpeg -ss 0.5 -frames:v 1 -vf scale=256:-1` invocation
-//!     handles both stills (any common image format) and videos. For
-//!     a short clip with motion at the head, the 0.5 s seek avoids
-//!     fade-in black frames. For stills, ffmpeg treats the input as
-//!     a single-frame stream and the `-ss` is a no-op.
+//!   * A single `ffmpeg -frames:v 1 -vf scale=256:-1` invocation
+//!     handles both stills (any common image format) and videos. No
+//!     pre-roll seek — `-ss 0.5` was tempting for video fade-ins, but
+//!     a still has a 1-frame stream of duration 1/25 s, so the seek
+//!     pushes past EOF and ffmpeg exits zero with no file written.
+//!     The skipped-fade-in benefit isn't worth the still-image
+//!     breakage. `-update 1` tells the image2 muxer this is a single
+//!     image, not a sequence — suppresses an otherwise-spurious
+//!     pattern warning.
 //!   * If ffmpeg is unavailable or fails for a particular file, we
 //!     return Err and the caller falls back to text-only rendering
 //!     — the tray must never block the popover on thumbnail trouble.
@@ -81,7 +85,6 @@ fn generate(source: &Path, dest: &Path) -> Result<()> {
             "-hide_banner",
             "-loglevel", "error",
             "-y",
-            "-ss", "0.5",
             "-i",
         ])
         .arg(source)
@@ -93,6 +96,10 @@ fn generate(source: &Path, dest: &Path) -> Result<()> {
             // GdkPixbuf (it sniffs) but leaves us with .png files that
             // are actually JPEG. Honest naming wins.
             "-c:v", "png",
+            // Treat this as a single image, not a numbered sequence —
+            // otherwise the image2 muxer prints a "filename does not
+            // contain an image sequence pattern" warning on every call.
+            "-update", "1",
             "-f", "image2",
         ])
         .arg(&tmp)

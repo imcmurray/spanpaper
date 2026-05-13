@@ -45,7 +45,24 @@ impl PartialConfig {
 /// window compact, big enough to show a meaningful preview.
 const MAX_EDGE_PX: i32 = 220;
 
+/// CSS widget-name tag we set on the palette window so subsequent
+/// `show()` calls can locate it via `Application::windows()` and raise
+/// the existing instance instead of stacking up duplicates.
+const PALETTE_WIDGET_NAME: &str = "spanpaper-palette";
+
 pub fn show(app: &gtk4::Application) {
+    // Single-instance: if a palette window is already open, raise and
+    // focus it instead of spawning a second one. Drop handlers close
+    // the window after a successful assignment, so this path only
+    // matters when the user clicks the tray icon while their existing
+    // palette is still visible.
+    for w in app.windows() {
+        if w.widget_name() == PALETTE_WIDGET_NAME {
+            w.present();
+            return;
+        }
+    }
+
     let outputs = match crate::outputs_query::list() {
         Ok(v) => v,
         Err(e) => {
@@ -63,6 +80,7 @@ pub fn show(app: &gtk4::Application) {
         .resizable(false)
         .default_width(480)
         .build();
+    window.set_widget_name(PALETTE_WIDGET_NAME);
 
     let root = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Vertical)
