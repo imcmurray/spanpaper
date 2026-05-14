@@ -35,7 +35,7 @@ depends=('mpvpaper' 'swaybg' 'gtk4' 'gtk4-layer-shell')
 provides=("$_pkgname=$pkgver")
 conflicts=("$_pkgname")
 source=("$_pkgname-$pkgver-x86_64.tar.gz::$url/releases/download/v$pkgver/$_pkgname-$pkgver-x86_64.tar.gz")
-sha256sums=('39e70c624f4def8b34d8600a912179c7360d5a6e13dc1bd56385169a1e7e3205')
+sha256sums=('750f58fad50bd36bb23c77c45c2fea9fb64bfc1c53c520a21eccb7084328087c')
 
 package() {
     cd "$_pkgname-$pkgver-x86_64"
