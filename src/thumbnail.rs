@@ -72,8 +72,8 @@ pub fn ensure(source: &Path) -> Result<PathBuf> {
 }
 
 fn generate(source: &Path, dest: &Path) -> Result<()> {
-    let ffmpeg = which::which("ffmpeg")
-        .context("`ffmpeg` not on PATH (install: pacman -S ffmpeg)")?;
+    let ffmpeg =
+        which::which("ffmpeg").context("`ffmpeg` not on PATH (install: pacman -S ffmpeg)")?;
 
     // Write to a temp sibling, then rename, so a partial file from a
     // killed ffmpeg never leaks into the cache.
@@ -81,26 +81,26 @@ fn generate(source: &Path, dest: &Path) -> Result<()> {
     let _ = fs::remove_file(&tmp);
 
     let status = Command::new(&ffmpeg)
-        .args([
-            "-hide_banner",
-            "-loglevel", "error",
-            "-y",
-            "-i",
-        ])
+        .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
         .arg(source)
         .args([
-            "-frames:v", "1",
-            "-vf", &format!("scale={THUMB_WIDTH}:-1:flags=lanczos"),
+            "-frames:v",
+            "1",
+            "-vf",
+            &format!("scale={THUMB_WIDTH}:-1:flags=lanczos"),
             // Force PNG output to match the cache file's extension —
             // ffmpeg's image2 muxer defaults to mjpeg, which works for
             // GdkPixbuf (it sniffs) but leaves us with .png files that
             // are actually JPEG. Honest naming wins.
-            "-c:v", "png",
+            "-c:v",
+            "png",
             // Treat this as a single image, not a numbered sequence —
             // otherwise the image2 muxer prints a "filename does not
             // contain an image sequence pattern" warning on every call.
-            "-update", "1",
-            "-f", "image2",
+            "-update",
+            "1",
+            "-f",
+            "image2",
         ])
         .arg(&tmp)
         .status()

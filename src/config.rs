@@ -102,10 +102,18 @@ pub enum SpanDirection {
 fn default_span_outputs() -> Vec<String> {
     vec!["HDMI-A-4".into(), "DP-6".into()]
 }
-fn default_side_output() -> Option<String> { Some("DP-5".into()) }
-fn default_span_direction() -> SpanDirection { SpanDirection::Vertical }
-fn default_span_fit() -> String { "crop".into() }
-fn default_side_fit() -> String { "crop".into() }
+fn default_side_output() -> Option<String> {
+    Some("DP-5".into())
+}
+fn default_span_direction() -> SpanDirection {
+    SpanDirection::Vertical
+}
+fn default_span_fit() -> String {
+    "crop".into()
+}
+fn default_side_fit() -> String {
+    "crop".into()
+}
 
 impl Default for Config {
     fn default() -> Self {
@@ -133,10 +141,9 @@ impl Config {
 
     pub fn load() -> Result<Self> {
         let p = Self::path()?;
-        let text = fs::read_to_string(&p)
-            .with_context(|| format!("read {}", p.display()))?;
-        let cfg: Config = toml::from_str(&text)
-            .with_context(|| format!("parse {}", p.display()))?;
+        let text = fs::read_to_string(&p).with_context(|| format!("read {}", p.display()))?;
+        let cfg: Config =
+            toml::from_str(&text).with_context(|| format!("parse {}", p.display()))?;
         Ok(cfg)
     }
 
@@ -150,8 +157,7 @@ impl Config {
     pub fn save(&self) -> Result<()> {
         let p = Self::path()?;
         if let Some(parent) = p.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("mkdir {}", parent.display()))?;
+            fs::create_dir_all(parent).with_context(|| format!("mkdir {}", parent.display()))?;
         }
         let text = toml::to_string_pretty(self).context("serialize toml")?;
         // Atomic write: tmp + rename, so a crash mid-write never leaves a
@@ -167,15 +173,13 @@ impl Config {
             "config.span is unset; run `spanpaper set --span PATH` (any image or video)",
         )?;
         ensure_file(span, "span")?;
-        MediaKind::detect(span).with_context(|| {
-            format!("could not classify span content: {}", span.display())
-        })?;
+        MediaKind::detect(span)
+            .with_context(|| format!("could not classify span content: {}", span.display()))?;
 
         if let Some(side) = &self.side {
             ensure_file(side, "side")?;
-            MediaKind::detect(side).with_context(|| {
-                format!("could not classify side content: {}", side.display())
-            })?;
+            MediaKind::detect(side)
+                .with_context(|| format!("could not classify side content: {}", side.display()))?;
         }
 
         if self.span_outputs.is_empty() {
@@ -202,7 +206,11 @@ impl Config {
     /// Copy a preset's fields onto the active config and mark it as
     /// active. Returns Err if no preset with the given name exists.
     pub fn apply_preset(&mut self, name: &str) -> Result<()> {
-        let preset = self.presets.iter().find(|p| p.name == name).cloned()
+        let preset = self
+            .presets
+            .iter()
+            .find(|p| p.name == name)
+            .cloned()
             .with_context(|| format!("no preset named {name:?}"))?;
         self.span = preset.span;
         self.side = preset.side;
@@ -232,9 +240,7 @@ pub fn validate_preset_name(name: &str) -> Result<()> {
     }
     for c in name.chars() {
         if c.is_control() || c == '/' || c == '\\' || c == '\n' {
-            anyhow::bail!(
-                "preset name contains forbidden character {c:?} in {name:?}"
-            );
+            anyhow::bail!("preset name contains forbidden character {c:?} in {name:?}");
         }
     }
     Ok(())
@@ -248,4 +254,135 @@ fn ensure_file(p: &Path, label: &str) -> Result<()> {
         anyhow::bail!("{label} path is not a regular file: {}", p.display());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn round_trip_default() {
+        // Serialise a default Config to TOML and read it back; the
+        // result must match field-for-field. Guards against accidental
+        // breakage of #[serde(default = "…")] when fields are added.
+        let original = Config::default();
+        let toml = toml::to_string_pretty(&original).expect("serialise");
+        let parsed: Config = toml::from_str(&toml).expect("parse");
+        assert_eq!(parsed.audio, original.audio);
+        assert_eq!(parsed.span_outputs, original.span_outputs);
+        assert_eq!(parsed.span_fit, original.span_fit);
+        assert_eq!(parsed.side_fit, original.side_fit);
+        assert_eq!(parsed.presets.len(), 0);
+        assert_eq!(parsed.active_preset, None);
+    }
+
+    #[test]
+    fn parse_ignores_unknown_and_deprecated_fields() {
+        // Configs from before v0.4 may still have `side_mode = "fill"`
+        // sitting in the TOML; toml's serde happily ignores unknown
+        // fields. This test pins that behaviour so a future
+        // serde_derive change doesn't accidentally break old configs.
+        let toml = r#"
+            span = "/x/y.mp4"
+            side_mode = "fill"
+            unknown_future_field = 42
+        "#;
+        let cfg: Config = toml::from_str(toml).expect("parse should ignore unknowns");
+        assert_eq!(
+            cfg.span.as_deref().map(|p| p.to_str().unwrap()),
+            Some("/x/y.mp4")
+        );
+        // Defaults survive when fields aren't given:
+        assert_eq!(cfg.span_fit, "crop");
+        assert_eq!(cfg.side_fit, "crop");
+    }
+
+    #[test]
+    fn preset_save_and_apply_round_trip() {
+        // Snapshot active state into a preset, mutate the active
+        // state, then apply the preset back — original fields restored.
+        let mut cfg = Config {
+            span: Some(PathBuf::from("/orig/span.mp4")),
+            side: Some(PathBuf::from("/orig/side.jpg")),
+            audio: true,
+            span_fit: "fit".into(),
+            side_fit: "stretch".into(),
+            ..Config::default()
+        };
+        let preset = cfg.snapshot_as_preset("baseline".into());
+        cfg.presets.push(preset);
+
+        // Diverge the active state.
+        cfg.span = Some(PathBuf::from("/changed/elsewhere.mp4"));
+        cfg.audio = false;
+        cfg.span_fit = "crop".into();
+
+        cfg.apply_preset("baseline").expect("apply");
+        assert_eq!(
+            cfg.span.as_deref().map(|p| p.to_str().unwrap()),
+            Some("/orig/span.mp4")
+        );
+        assert!(cfg.audio);
+        assert_eq!(cfg.span_fit, "fit");
+        assert_eq!(cfg.side_fit, "stretch");
+        assert_eq!(cfg.active_preset.as_deref(), Some("baseline"));
+    }
+
+    #[test]
+    fn preset_index_finds_position() {
+        let mut cfg = Config::default();
+        for name in ["a", "b", "c"] {
+            cfg.presets.push(cfg.snapshot_as_preset(name.into()));
+        }
+        assert_eq!(cfg.preset_index("a"), Some(0));
+        assert_eq!(cfg.preset_index("b"), Some(1));
+        assert_eq!(cfg.preset_index("c"), Some(2));
+        assert_eq!(cfg.preset_index("missing"), None);
+    }
+
+    #[test]
+    fn validate_preset_name_accepts_kebab_and_alpha() {
+        validate_preset_name("nature-still").unwrap();
+        validate_preset_name("preset1").unwrap();
+        validate_preset_name("a").unwrap();
+        validate_preset_name("Daily Driver").unwrap(); // space ok
+    }
+
+    #[test]
+    fn validate_preset_name_rejects_garbage() {
+        assert!(validate_preset_name("").is_err(), "empty");
+        assert!(validate_preset_name(".hidden").is_err(), "leading dot");
+        assert!(validate_preset_name("a/b").is_err(), "slash");
+        assert!(validate_preset_name("a\\b").is_err(), "backslash");
+        assert!(validate_preset_name("a\nb").is_err(), "newline");
+        assert!(validate_preset_name("a\0b").is_err(), "nul");
+    }
+
+    #[test]
+    fn preset_field_round_trip_in_toml() {
+        let mut cfg = Config::default();
+        cfg.presets.push(Preset {
+            name: "x".into(),
+            span: Some(PathBuf::from("/a.mp4")),
+            side: Some(PathBuf::from("/b.jpg")),
+            audio: true,
+            span_fit: "fit".into(),
+            side_fit: "stretch".into(),
+            span_direction: SpanDirection::Horizontal,
+        });
+        cfg.active_preset = Some("x".into());
+        let toml = toml::to_string_pretty(&cfg).expect("serialise");
+        assert!(
+            toml.contains("active_preset = \"x\""),
+            "missing active_preset:\n{toml}"
+        );
+        assert!(
+            toml.contains("[[presets]]"),
+            "missing [[presets]] section:\n{toml}"
+        );
+        let parsed: Config = toml::from_str(&toml).expect("re-parse");
+        assert_eq!(parsed.presets.len(), 1);
+        assert_eq!(parsed.presets[0].name, "x");
+        assert_eq!(parsed.active_preset.as_deref(), Some("x"));
+    }
 }

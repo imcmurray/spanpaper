@@ -12,11 +12,7 @@
 
 use nix::{sys::signal::kill, unistd::Pid};
 use spanpaper::{ipc, state};
-use std::{
-    path::Path,
-    process::Command,
-    time::Duration,
-};
+use std::{path::Path, process::Command, time::Duration};
 
 /// Which slot of the wallpaper configuration a drop or picker targets.
 #[derive(Copy, Clone, Debug)]
@@ -50,7 +46,8 @@ pub fn start_daemon() -> std::io::Result<()> {
     // can race: spanpaper sees the lingering pid file and refuses to
     // start with "daemon already running". stop_daemon also waits, so
     // this is normally instant.
-    for _ in 0..100 {  // up to 5 s
+    for _ in 0..100 {
+        // up to 5 s
         if !daemon_alive() {
             break;
         }
@@ -91,7 +88,8 @@ pub fn stop_daemon() -> std::io::Result<()> {
     };
     kill(Pid::from_raw(pid), nix::sys::signal::Signal::SIGTERM)
         .map_err(|e| std::io::Error::other(format!("kill(SIGTERM, {pid}): {e}")))?;
-    for _ in 0..100 {  // up to 5 s
+    for _ in 0..100 {
+        // up to 5 s
         if !daemon_alive() {
             return Ok(());
         }
@@ -139,14 +137,13 @@ pub fn set_audio(enabled: bool) -> std::io::Result<()> {
 }
 
 fn spanpaper_set(args: &[&str]) -> std::io::Result<()> {
-    let status = Command::new("spanpaper")
-        .arg("set")
-        .args(args)
-        .status()?;
+    let status = Command::new("spanpaper").arg("set").args(args).status()?;
     if status.success() {
         Ok(())
     } else {
-        Err(std::io::Error::other(format!("spanpaper set {args:?} exited {status}")))
+        Err(std::io::Error::other(format!(
+            "spanpaper set {args:?} exited {status}"
+        )))
     }
 }
 
@@ -225,12 +222,20 @@ fn broadcast(set_pause: bool) {
         return;
     }
     for s in socks {
-        let r = if set_pause { ipc::pause(&s) } else { ipc::unpause(&s) };
+        let r = if set_pause {
+            ipc::pause(&s)
+        } else {
+            ipc::unpause(&s)
+        };
         if let Err(e) = r {
             tracing::warn!("ipc {}: {e:#}", s.display());
         }
     }
 }
 
-pub fn pause_playback()  { broadcast(true)  }
-pub fn resume_playback() { broadcast(false) }
+pub fn pause_playback() {
+    broadcast(true)
+}
+pub fn resume_playback() {
+    broadcast(false)
+}

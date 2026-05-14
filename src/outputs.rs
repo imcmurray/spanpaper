@@ -22,8 +22,8 @@ use wayland_protocols::xdg::xdg_output::zv1::client::{
 
 #[derive(Debug, Clone)]
 pub struct Output {
-    pub name: String,       // e.g. "HDMI-A-4"
-    #[allow(dead_code)]     // reserved for richer diagnostics
+    pub name: String, // e.g. "HDMI-A-4"
+    #[allow(dead_code)] // reserved for richer diagnostics
     pub description: String,
     pub x: i32,
     pub y: i32,
@@ -33,10 +33,9 @@ pub struct Output {
 }
 
 pub fn detect() -> Result<Vec<Output>> {
-    let conn = Connection::connect_to_env()
-        .context("connect to Wayland (is WAYLAND_DISPLAY set?)")?;
-    let (globals, mut queue) =
-        registry_queue_init::<State>(&conn).context("init wl_registry")?;
+    let conn =
+        Connection::connect_to_env().context("connect to Wayland (is WAYLAND_DISPLAY set?)")?;
+    let (globals, mut queue) = registry_queue_init::<State>(&conn).context("init wl_registry")?;
     let qh = queue.handle();
 
     let mut state = State::new(&globals, &qh)?;
@@ -100,9 +99,8 @@ impl State {
         for g in globals.contents().clone_list() {
             if g.interface == "wl_output" {
                 // Bind the wl_output and immediately request an xdg_output for it.
-                let wl_out: wl_output::WlOutput = globals
-                    .registry()
-                    .bind(g.name, g.version.min(4), qh, ());
+                let wl_out: wl_output::WlOutput =
+                    globals.registry().bind(g.name, g.version.min(4), qh, ());
                 let id = wl_out.id().protocol_id();
                 state.pending.entry(id).or_default();
                 let _xdg: ZxdgOutputV1 = state.xdg_mgr.get_xdg_output(&wl_out, qh, id);
@@ -124,7 +122,8 @@ impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for State {
         _: &GlobalListContents,
         _: &Connection,
         _: &QueueHandle<Self>,
-    ) {}
+    ) {
+    }
 }
 
 impl Dispatch<wl_output::WlOutput, ()> for State {
@@ -143,7 +142,12 @@ impl Dispatch<wl_output::WlOutput, ()> for State {
                 entry.x = x;
                 entry.y = y;
             }
-            wl_output::Event::Mode { flags, width, height, .. } => {
+            wl_output::Event::Mode {
+                flags,
+                width,
+                height,
+                ..
+            } => {
                 if flags
                     .into_result()
                     .map(|f| f.contains(wl_output::Mode::Current))
@@ -218,5 +222,6 @@ impl Dispatch<ZxdgOutputManagerV1, ()> for State {
         _: &(),
         _: &Connection,
         _: &QueueHandle<Self>,
-    ) {}
+    ) {
+    }
 }

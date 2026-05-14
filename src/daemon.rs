@@ -154,8 +154,7 @@ fn supervisor_loop() -> Result<()> {
 }
 
 fn start_workers() -> Result<Vec<Worker>> {
-    let cfg = Config::load()
-        .context("load config (run `spanpaper set --span PATH ...` first)")?;
+    let cfg = Config::load().context("load config (run `spanpaper set --span PATH ...` first)")?;
     cfg.validate()?;
 
     let detected = outputs::detect().unwrap_or_default();
@@ -164,7 +163,8 @@ fn start_workers() -> Result<Vec<Worker>> {
         if !names.iter().any(|n| n == want) {
             tracing::warn!(
                 "configured output {:?} not currently present (have: {:?})",
-                want, names
+                want,
+                names
             );
         }
     }
@@ -196,10 +196,7 @@ fn start_workers() -> Result<Vec<Worker>> {
 /// this just unpauses whoever's there; the side worker would
 /// otherwise stay paused since it's spawned with `pause=yes`.
 fn sync_unpause_span_workers(workers: &[Worker]) {
-    let sockets: Vec<&std::path::Path> = workers
-        .iter()
-        .filter_map(|w| w.ipc_socket())
-        .collect();
+    let sockets: Vec<&std::path::Path> = workers.iter().filter_map(|w| w.ipc_socket()).collect();
     if sockets.is_empty() {
         // Nothing to unpause (no video workers at all, or stills only).
         return;
@@ -244,8 +241,8 @@ fn write_pid_file(path: &PathBuf) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).ok();
     }
-    let mut f = fs::File::create(path)
-        .with_context(|| format!("create pid file {}", path.display()))?;
+    let mut f =
+        fs::File::create(path).with_context(|| format!("create pid file {}", path.display()))?;
     writeln!(f, "{}", std::process::id()).context("write pid")?;
     Ok(())
 }
@@ -273,8 +270,8 @@ fn install_signal_handlers() -> Result<()> {
     );
     unsafe {
         sigaction(Signal::SIGTERM, &term).context("install SIGTERM handler")?;
-        sigaction(Signal::SIGINT,  &term).context("install SIGINT handler")?;
-        sigaction(Signal::SIGHUP,  &hup).context("install SIGHUP handler")?;
+        sigaction(Signal::SIGINT, &term).context("install SIGINT handler")?;
+        sigaction(Signal::SIGHUP, &hup).context("install SIGHUP handler")?;
     }
     Ok(())
 }

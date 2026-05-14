@@ -1,9 +1,9 @@
 // CLI surface: clap definitions and subcommand dispatch.
 
-use spanpaper::{config::Config, outputs};
 use crate::daemon;
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
+use spanpaper::{config::Config, outputs};
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -171,7 +171,7 @@ fn cmd_preset(sub: PresetCmd) -> Result<()> {
             // Overwrite if present, otherwise append (insertion order).
             match cfg.presets.iter().position(|p| p.name == name) {
                 Some(i) => cfg.presets[i] = preset,
-                None    => cfg.presets.push(preset),
+                None => cfg.presets.push(preset),
             }
             cfg.active_preset = Some(name.clone());
             cfg.save().context("save config")?;
@@ -211,7 +211,10 @@ fn cmd_preset(sub: PresetCmd) -> Result<()> {
         }
         PresetCmd::Rename { old, new } => {
             validate_preset_name(&new)?;
-            let i = cfg.presets.iter().position(|p| p.name == old)
+            let i = cfg
+                .presets
+                .iter()
+                .position(|p| p.name == old)
                 .with_context(|| format!("no preset named {old:?}"))?;
             if cfg.presets.iter().any(|p| p.name == new) && new != old {
                 anyhow::bail!("preset {new:?} already exists");
@@ -234,7 +237,11 @@ fn cycle_preset(cfg: &mut Config, delta: isize) -> Result<()> {
         anyhow::bail!("no presets saved — use `spanpaper preset save NAME` first");
     }
     let len = cfg.presets.len() as isize;
-    let next_idx = match cfg.active_preset.as_deref().and_then(|n| cfg.preset_index(n)) {
+    let next_idx = match cfg
+        .active_preset
+        .as_deref()
+        .and_then(|n| cfg.preset_index(n))
+    {
         Some(i) => ((i as isize + delta).rem_euclid(len)) as usize,
         // Nothing active (or stale name) — start cycle at index 0,
         // independent of direction. Predictable: cycle from a clean
@@ -439,13 +446,12 @@ fn cmd_install(a: InstallArgs) -> Result<()> {
 
 fn write_autostart(path: &std::path::Path, content: &str) -> Result<()> {
     // tmp-extension chosen to be benign for both .desktop and .service.
-    let tmp = path.with_extension(
-        format!("{}.tmp", path.extension().and_then(|e| e.to_str()).unwrap_or("tmp")),
-    );
-    std::fs::write(&tmp, content)
-        .with_context(|| format!("write {}", tmp.display()))?;
-    std::fs::rename(&tmp, path)
-        .with_context(|| format!("rename to {}", path.display()))?;
+    let tmp = path.with_extension(format!(
+        "{}.tmp",
+        path.extension().and_then(|e| e.to_str()).unwrap_or("tmp")
+    ));
+    std::fs::write(&tmp, content).with_context(|| format!("write {}", tmp.display()))?;
+    std::fs::rename(&tmp, path).with_context(|| format!("rename to {}", path.display()))?;
     Ok(())
 }
 
@@ -479,23 +485,52 @@ fn cmd_set(a: SetArgs) -> Result<()> {
         cfg.side = Some(validated_media_path(&i, "--side")?);
         preset_relevant_changed = true;
     }
-    if a.audio   { cfg.audio = true;  preset_relevant_changed = true; }
-    if a.no_audio{ cfg.audio = false; preset_relevant_changed = true; }
-    if let Some(s) = a.span_outputs { cfg.span_outputs = s; }
-    if let Some(o) = a.side_output  { cfg.side_output = Some(o); }
-    if let Some(f) = a.span_fit     { cfg.span_fit = f; preset_relevant_changed = true; }
-    if let Some(f) = a.side_fit     { cfg.side_fit = f; preset_relevant_changed = true; }
+    if a.audio {
+        cfg.audio = true;
+        preset_relevant_changed = true;
+    }
+    if a.no_audio {
+        cfg.audio = false;
+        preset_relevant_changed = true;
+    }
+    if let Some(s) = a.span_outputs {
+        cfg.span_outputs = s;
+    }
+    if let Some(o) = a.side_output {
+        cfg.side_output = Some(o);
+    }
+    if let Some(f) = a.span_fit {
+        cfg.span_fit = f;
+        preset_relevant_changed = true;
+    }
+    if let Some(f) = a.side_fit {
+        cfg.side_fit = f;
+        preset_relevant_changed = true;
+    }
 
     if preset_relevant_changed {
         if let Some(name) = cfg.active_preset.take() {
-            tracing::info!(
-                "active config diverged from preset {name:?} — clearing active_preset"
-            );
+            tracing::info!("active config diverged from preset {name:?} — clearing active_preset");
         }
     }
 
     cfg.save().context("saving config")?;
     tracing::info!("config saved to {}", Config::path()?.display());
+
+    // Pre-compute thumbnails for any newly-set slot so the tray's
+    // palette can load PNGs synchronously (no GTK-thread blocking
+    // on ffmpeg, no spinner-then-swap dance). Best-effort: if
+    // ffmpeg isn't available or fails, just log; the tray falls
+    // back to its resolution-text placeholder.
+    for path in [cfg.span.as_deref(), cfg.side.as_deref()]
+        .into_iter()
+        .flatten()
+    {
+        match spanpaper::thumbnail::ensure(path) {
+            Ok(p) => tracing::debug!("thumbnail ready: {}", p.display()),
+            Err(e) => tracing::warn!("pre-compute thumbnail for {}: {e:#}", path.display()),
+        }
+    }
 
     if !a.no_reload {
         match daemon::reload() {
@@ -515,7 +550,7 @@ fn cmd_status() -> Result<()> {
         "daemon: {}",
         match pid {
             Some(p) => format!("running (pid {p})"),
-            None    => "not running".into(),
+            None => "not running".into(),
         }
     );
 
@@ -592,4 +627,41 @@ fn validated_media_path(p: &std::path::Path, flag: &str) -> Result<PathBuf> {
         );
     }
     Ok(resolved)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validated_media_path_rejects_garbage() {
+        // Empty: clap normally enforces "value required", but the
+        // guard fires anyway if anything sneaks through.
+        assert!(validated_media_path(std::path::Path::new(""), "--span").is_err());
+        // Newline: the actual v0.3.x bug a test script triggered when
+        // a grep glued three TOML lines together.
+        assert!(validated_media_path(std::path::Path::new("/a/b\nc/d.mp4"), "--span",).is_err());
+        // NUL byte: never valid in a Linux path.
+        assert!(validated_media_path(std::path::Path::new("/a/\0b.mp4"), "--side",).is_err());
+    }
+
+    #[test]
+    fn validated_media_path_accepts_normal_paths() {
+        // Existence isn't required — the guard's purpose is to reject
+        // malformed input, not to gate on filesystem state.
+        let result = validated_media_path(
+            std::path::Path::new("/this/file/does/not/exist.mp4"),
+            "--span",
+        );
+        assert!(result.is_ok(), "should accept missing file: {result:?}");
+    }
+
+    #[test]
+    fn validated_media_path_accepts_paths_with_spaces() {
+        let result = validated_media_path(
+            std::path::Path::new("/home/u/Pictures/Screenshot 2025-01-01.png"),
+            "--side",
+        );
+        assert!(result.is_ok(), "should accept spaces in path: {result:?}");
+    }
 }

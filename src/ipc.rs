@@ -83,7 +83,9 @@ pub fn pause(socket: &Path) -> Result<()> {
 /// the span pair + side video without knowing their exact names.
 pub fn enumerate_sockets() -> Vec<PathBuf> {
     let Ok(dir) = socket_dir() else { return vec![] };
-    let Ok(rd) = fs::read_dir(&dir) else { return vec![] };
+    let Ok(rd) = fs::read_dir(&dir) else {
+        return vec![];
+    };
     rd.filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| {
             p.file_name()

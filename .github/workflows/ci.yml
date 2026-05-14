@@ -1,0 +1,71 @@
+name: ci
+
+# Catches the regressions a single dev environment misses: clippy
+# warnings, format drift, tests broken on a different toolchain, and
+# build failure of the tray feature behind --features tray (the
+# heaviest dep tree). Runs on every push and PR against main and 0.4.
+
+on:
+  push:
+    branches: [main, "0.4"]
+  pull_request:
+    branches: [main, "0.4"]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  fmt:
+    name: cargo fmt --check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy-and-test:
+    name: clippy + test (daemon only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test --release
+
+  build-tray:
+    name: build with --features tray
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: install GTK4 + layer-shell headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-4-dev \
+            libgtk4-layer-shell-dev \
+            libdbus-1-dev \
+            pkg-config
+      - name: cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-tray-${{ hashFiles('**/Cargo.lock') }}
+      - run: cargo build --release --features tray
+      - run: cargo clippy --release --features tray --all-targets -- -D warnings

@@ -1,3 +1,8 @@
+// Hand-aligned ASCII tables in the architecture doc-comment below
+// trigger clippy's `doc_overindented_list_items` lint; the alignment
+// is the point.
+#![allow(clippy::doc_overindented_list_items)]
+
 //! spanpaper-tray — StatusNotifierItem applet for the system tray.
 //!
 //! Architecture:
@@ -20,7 +25,6 @@ mod daemon_client;
 mod dialog;
 mod outputs_query;
 mod palette;
-mod thumbnail;
 
 use anyhow::Result;
 use gtk4::prelude::*;
@@ -75,7 +79,7 @@ impl Tray for SpanpaperTray {
         // freedesktop icon-naming-spec entries present in any modern
         // icon theme.
         match (self.daemon_running, self.paused) {
-            (false, _)   => "media-playback-stop".into(),
+            (false, _) => "media-playback-stop".into(),
             (true, true) => "media-playback-pause".into(),
             (true, false) => "preferences-desktop-wallpaper".into(),
         }
@@ -196,10 +200,7 @@ impl Tray for SpanpaperTray {
             items.push(
                 SubMenu {
                     label: "Audio".into(),
-                    submenu: vec![
-                        audio_item("On", true),
-                        audio_item("Off (default)", false),
-                    ],
+                    submenu: vec![audio_item("On", true), audio_item("Off (default)", false)],
                     ..Default::default()
                 }
                 .into(),
@@ -330,13 +331,10 @@ fn audio_item(label: &str, on: bool) -> MenuItem<SpanpaperTray> {
     .into()
 }
 
-fn build_presets_submenu(
-    tx: &async_channel::Sender<UiMsg>,
-) -> MenuItem<SpanpaperTray> {
+fn build_presets_submenu(tx: &async_channel::Sender<UiMsg>) -> MenuItem<SpanpaperTray> {
     // Snapshot config; render fails closed (empty preset list) if
     // anything goes wrong.
-    let cfg = spanpaper::config::Config::load_or_default()
-        .unwrap_or_default();
+    let cfg = spanpaper::config::Config::load_or_default().unwrap_or_default();
     let active = cfg.active_preset.clone();
 
     let mut submenu: Vec<MenuItem<SpanpaperTray>> = Vec::new();

@@ -14,3 +14,4 @@ pub mod ipc;
 pub mod media;
 pub mod outputs;
 pub mod state;
+pub mod thumbnail;

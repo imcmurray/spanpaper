@@ -11,11 +11,13 @@
 use crate::{
     daemon_client::{self, Slot},
     outputs_query::OutputInfo,
-    thumbnail,
 };
 use gtk4::prelude::*;
 use gtk4_layer_shell::LayerShell;
-use spanpaper::config::{Config, SpanDirection};
+use spanpaper::{
+    config::{Config, SpanDirection},
+    thumbnail,
+};
 use std::path::Path;
 
 /// Load the daemon's config, falling back to a default if anything
@@ -117,9 +119,7 @@ pub fn show(app: &gtk4::Application, click_x: i32, click_y: i32) {
     window.connect_is_active_notify(move |w| {
         if w.is_active() {
             state_for_focus.was_active.set(true);
-        } else if state_for_focus.was_active.get()
-            && !state_for_focus.suppress_autoclose.get()
-        {
+        } else if state_for_focus.was_active.get() && !state_for_focus.suppress_autoclose.get() {
             w.close();
         }
     });
@@ -260,25 +260,34 @@ fn build_layout_row(outputs: &[OutputInfo], cfg: &Config) -> gtk4::Box {
     let span_box = (!span_outs.is_empty()).then(|| {
         let dir = match cfg.span_direction {
             SpanDirection::Horizontal => gtk4::Orientation::Horizontal,
-            SpanDirection::Vertical   => gtk4::Orientation::Vertical,
+            SpanDirection::Vertical => gtk4::Orientation::Vertical,
         };
-        let group = gtk4::Box::builder()
-            .orientation(dir)
-            .spacing(2)
-            .build();
+        let group = gtk4::Box::builder().orientation(dir).spacing(2).build();
         for o in &span_outs {
-            group.append(&build_output_frame(o, cfg.span.as_deref(), scale, Slot::Span));
+            group.append(&build_output_frame(
+                o,
+                cfg.span.as_deref(),
+                scale,
+                Slot::Span,
+            ));
         }
         let leftmost_x = span_outs.iter().map(|o| o.x).min().unwrap_or(0);
         (leftmost_x, group)
     });
     let side_frame = side_out.map(|o| {
-        (o.x, build_output_frame(o, cfg.side.as_deref(), scale, Slot::Side))
+        (
+            o.x,
+            build_output_frame(o, cfg.side.as_deref(), scale, Slot::Side),
+        )
     });
 
     let mut placed: Vec<(i32, gtk4::Widget)> = Vec::new();
-    if let Some((x, w)) = span_box { placed.push((x, w.upcast::<gtk4::Widget>())); }
-    if let Some((x, w)) = side_frame { placed.push((x, w.upcast::<gtk4::Widget>())); }
+    if let Some((x, w)) = span_box {
+        placed.push((x, w.upcast::<gtk4::Widget>()));
+    }
+    if let Some((x, w)) = side_frame {
+        placed.push((x, w.upcast::<gtk4::Widget>()));
+    }
     placed.sort_by_key(|(x, _)| *x);
     for (_, w) in placed {
         row.append(&w);
@@ -314,13 +323,13 @@ fn build_output_frame(
         None => "(unset)".into(),
     };
     let frame = gtk4::Frame::builder()
-        .label(&format!("{}  ({})", out.name, role))
+        .label(format!("{}  ({})", out.name, role))
         .label_xalign(0.5)
         .width_request(w)
         .height_request(h)
         // Hover/screen-reader text: full output info + current file +
         // hint that this is a drop target.
-        .tooltip_text(&format!(
+        .tooltip_text(format!(
             "{} ({}×{})\nCurrently: {}\nDrop an image or video here to assign it to the {} slot.",
             out.name, out.width, out.height, assigned_text, role,
         ))
@@ -332,10 +341,8 @@ fn build_output_frame(
     // sees the freshly-rendered thumbnail. Non-local files (Flatpak
     // sandbox crossings) have no .path() — declined; M6's file
     // picker will cover those via xdg-desktop-portal.
-    let drop_target = gtk4::DropTarget::new(
-        gtk4::gio::File::static_type(),
-        gtk4::gdk::DragAction::COPY,
-    );
+    let drop_target =
+        gtk4::DropTarget::new(gtk4::gio::File::static_type(), gtk4::gdk::DragAction::COPY);
     let frame_for_close = frame.clone();
     drop_target.connect_drop(move |_target, value, _x, _y| {
         let file = match value.get::<gtk4::gio::File>() {
@@ -385,65 +392,33 @@ fn build_output_frame(
         .margin_end(4)
         .build();
 
-    // Wrap the thumbnail area in its own Box so we can swap its
-    // child once `thumbnail::ensure` (which shells to ffmpeg) finishes
-    // off the main thread. First paint shows a spinner; the actual
-    // thumbnail replaces it lazily so opening the palette never
-    // blocks on ffmpeg.
-    let thumb_area = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .hexpand(true)
-        .vexpand(true)
-        .halign(gtk4::Align::Fill)
-        .valign(gtk4::Align::Fill)
-        .build();
-    inner.append(&thumb_area);
-
+    // Thumbnails are pre-computed daemon-side at `spanpaper set` time
+    // (see cli.rs::cmd_set), so the palette is now a synchronous PNG
+    // load — no spinner, no gio::spawn_blocking, no weak refs. If the
+    // pre-compute hadn't run yet (e.g. first-ever open with a config
+    // written before this version), `thumbnail::ensure` will run
+    // synchronously on the GTK thread once and cache for next time.
+    // It's bounded to ~500 ms even in the worst case, and the
+    // dropped async machinery saved ~80 LoC.
     let res_text = format!("{}×{}", out.width, out.height);
-    if let Some(p) = assigned {
-        let spinner = gtk4::Spinner::builder()
-            .spinning(true)
-            .halign(gtk4::Align::Center)
-            .valign(gtk4::Align::Center)
-            .build();
-        thumb_area.append(&spinner);
-
-        let path = p.to_path_buf();
-        let thumb_area_w = thumb_area.downgrade();
-        let fallback_text = res_text.clone();
-        gtk4::glib::spawn_future_local(async move {
-            // spawn_blocking runs ffmpeg on glib's worker thread pool;
-            // its future resolves back on the GTK main loop where it's
-            // safe to mutate widgets.
-            let result = gtk4::gio::spawn_blocking(move || thumbnail::ensure(&path)).await;
-            let Some(thumb_area) = thumb_area_w.upgrade() else { return };
-            // Drop the spinner.
-            while let Some(child) = thumb_area.first_child() {
-                thumb_area.remove(&child);
-            }
-            match result {
-                Ok(Ok(thumb_path)) => {
-                    let pic = gtk4::Picture::for_filename(&thumb_path);
-                    pic.set_can_shrink(true);
-                    pic.set_content_fit(gtk4::ContentFit::Cover);
-                    pic.set_hexpand(true);
-                    pic.set_vexpand(true);
-                    thumb_area.append(&pic);
-                }
-                Ok(Err(e)) => {
-                    tracing::warn!("thumbnail: {e:#}");
-                    thumb_area.append(&fallback_label(&fallback_text));
-                }
-                Err(e) => {
-                    tracing::warn!("thumbnail worker panicked: {e:?}");
-                    thumb_area.append(&fallback_label(&fallback_text));
-                }
-            }
-        });
-    } else {
-        // No assignment — show the resolution placeholder immediately;
-        // no spinner because there's nothing to load.
-        thumb_area.append(&fallback_label(&res_text));
+    match assigned.and_then(|p| match thumbnail::ensure(p) {
+        Ok(thumb) => Some(thumb),
+        Err(e) => {
+            tracing::warn!("thumbnail for {}: {e:#}", p.display());
+            None
+        }
+    }) {
+        Some(thumb_path) => {
+            let pic = gtk4::Picture::for_filename(&thumb_path);
+            pic.set_can_shrink(true);
+            pic.set_content_fit(gtk4::ContentFit::Cover);
+            pic.set_hexpand(true);
+            pic.set_vexpand(true);
+            inner.append(&pic);
+        }
+        None => {
+            inner.append(&fallback_label(&res_text));
+        }
     }
 
     let file = gtk4::Label::builder()
@@ -464,7 +439,7 @@ fn summary_row(role: &str, slot: Slot, path: Option<&Path>) -> gtk4::Box {
         .spacing(8)
         .build();
     let role_label = gtk4::Label::builder()
-        .label(&format!("{role}:"))
+        .label(format!("{role}:"))
         .width_request(48)
         .xalign(0.0)
         .build();
@@ -487,7 +462,7 @@ fn summary_row(role: &str, slot: Slot, path: Option<&Path>) -> gtk4::Box {
     // a drop: set the slot, populate the window in place.
     let change = gtk4::Button::builder()
         .label("Change…")
-        .tooltip_text(&format!(
+        .tooltip_text(format!(
             "Open a file picker to assign a new image or video to the {role} slot"
         ))
         .build();
@@ -511,7 +486,7 @@ fn open_file_picker_for(button: &gtk4::Button, slot: Slot) {
         .and_then(|r| r.downcast::<gtk4::ApplicationWindow>().ok());
 
     let dialog = gtk4::FileDialog::builder()
-        .title(&format!("Set spanpaper {role}"))
+        .title(format!("Set spanpaper {role}"))
         .modal(true)
         .build();
 
@@ -519,11 +494,27 @@ fn open_file_picker_for(button: &gtk4::Button, slot: Slot) {
     let filter = gtk4::FileFilter::new();
     filter.set_name(Some("Images & videos"));
     for mt in [
-        "image/jpeg", "image/png", "image/webp", "image/bmp", "image/gif",
-        "image/tiff", "image/avif", "image/heif", "image/jxl",
-        "video/mp4", "video/x-matroska", "video/webm", "video/quicktime",
-        "video/x-msvideo", "video/x-ms-wmv", "video/x-flv", "video/mp2t",
-        "video/mpeg", "video/ogg", "video/3gpp", "video/3gpp2",
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/bmp",
+        "image/gif",
+        "image/tiff",
+        "image/avif",
+        "image/heif",
+        "image/jxl",
+        "video/mp4",
+        "video/x-matroska",
+        "video/webm",
+        "video/quicktime",
+        "video/x-msvideo",
+        "video/x-ms-wmv",
+        "video/x-flv",
+        "video/mp2t",
+        "video/mpeg",
+        "video/ogg",
+        "video/3gpp",
+        "video/3gpp2",
     ] {
         filter.add_mime_type(mt);
     }
@@ -599,4 +590,3 @@ fn basename(p: &Path) -> String {
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| p.display().to_string())
 }
-

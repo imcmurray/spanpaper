@@ -76,9 +76,27 @@ pub enum WorkerKind {
 impl Worker {
     pub fn spawn(kind: WorkerKind) -> Result<Self> {
         let (label, child) = match &kind {
-            WorkerKind::Mpv { output, path, vf, media, audio, fit, extra, ipc_socket } => (
+            WorkerKind::Mpv {
+                output,
+                path,
+                vf,
+                media,
+                audio,
+                fit,
+                extra,
+                ipc_socket,
+            } => (
                 format!("mpv:{output}"),
-                spawn_mpv(output, path, vf.as_deref(), *media, *audio, fit, extra, ipc_socket.as_deref())?,
+                spawn_mpv(
+                    output,
+                    path,
+                    vf.as_deref(),
+                    *media,
+                    *audio,
+                    fit,
+                    extra,
+                    ipc_socket.as_deref(),
+                )?,
             ),
             WorkerKind::Swaybg { output, path, mode } => (
                 format!("swaybg:{output}"),
@@ -99,7 +117,10 @@ impl Worker {
     /// after every worker has finished spawning.
     pub fn ipc_socket(&self) -> Option<&Path> {
         match &self.kind {
-            WorkerKind::Mpv { ipc_socket: Some(p), .. } => Some(p.as_path()),
+            WorkerKind::Mpv {
+                ipc_socket: Some(p),
+                ..
+            } => Some(p.as_path()),
             _ => None,
         }
     }
@@ -111,7 +132,9 @@ impl Worker {
                 let uptime = self.started_at.elapsed();
                 tracing::warn!(
                     "{}: exited {:?} after {:.1}s",
-                    self.label, status, uptime.as_secs_f32()
+                    self.label,
+                    status,
+                    uptime.as_secs_f32()
                 );
 
                 if uptime > Duration::from_secs(60) {
@@ -126,7 +149,8 @@ impl Worker {
                     );
                 }
 
-                let backoff = Duration::from_millis(500u64.saturating_mul(self.recent_failures as u64));
+                let backoff =
+                    Duration::from_millis(500u64.saturating_mul(self.recent_failures as u64));
                 std::thread::sleep(backoff.min(Duration::from_secs(5)));
 
                 let new = Self::spawn(self.kind.clone())?;
@@ -141,17 +165,20 @@ impl Worker {
                 // worker rejoins playback instead of sitting frozen.
                 // It'll be out of sync with the surviving worker until
                 // the user reloads — accept that vs. a black/frozen tile.
-                if let WorkerKind::Mpv { ipc_socket: Some(sock), .. } = &self.kind {
+                if let WorkerKind::Mpv {
+                    ipc_socket: Some(sock),
+                    ..
+                } = &self.kind
+                {
                     if ipc::wait_for_socket(sock, Duration::from_secs(5)) {
                         if let Err(e) = ipc::unpause(sock) {
-                            tracing::warn!(
-                                "{}: post-restart unpause failed: {e:#}", self.label
-                            );
+                            tracing::warn!("{}: post-restart unpause failed: {e:#}", self.label);
                         }
                     } else {
                         tracing::warn!(
                             "{}: ipc socket {} never came up after restart",
-                            self.label, sock.display()
+                            self.label,
+                            sock.display()
                         );
                     }
                 }
@@ -190,7 +217,7 @@ impl Worker {
 fn build_span_vf(vw: i32, vh: i32, w: i32, h: i32, x: i32, y: i32, fit: &str) -> String {
     let canvas = match fit {
         "stretch" => format!("scale={vw}:{vh}"),
-        "fit"     => format!(
+        "fit" => format!(
             "scale={vw}:{vh}:force_original_aspect_ratio=decrease,\
              pad={vw}:{vh}:(ow-iw)/2:(oh-ih)/2:color=black"
         ),
@@ -212,7 +239,7 @@ fn side_swaybg_mode(cfg: &Config) -> String {
     match cfg.side_fit.as_str() {
         "fit" => "fit".into(),
         "stretch" => "stretch".into(),
-        _ => "fill".into(),  // "crop" or unknown → fill (swaybg's scale-to-cover)
+        _ => "fill".into(), // "crop" or unknown → fill (swaybg's scale-to-cover)
     }
 }
 
@@ -223,7 +250,7 @@ fn compute_canvas(group: &[&Output], dir: SpanDirection) -> ((i32, i32), Vec<(i3
     for o in group {
         offsets.push((acc_x, acc_y));
         match dir {
-            SpanDirection::Vertical   => acc_y += o.height,
+            SpanDirection::Vertical => acc_y += o.height,
             SpanDirection::Horizontal => acc_x += o.width,
         }
     }
@@ -231,7 +258,7 @@ fn compute_canvas(group: &[&Output], dir: SpanDirection) -> ((i32, i32), Vec<(i3
         // For uniform spans we use any element's perpendicular dim; if the
         // user has mismatched output widths in a vertical span the seam
         // can't be uniform either way, so picking the first is reasonable.
-        SpanDirection::Vertical   => (group[0].width, acc_y),
+        SpanDirection::Vertical => (group[0].width, acc_y),
         SpanDirection::Horizontal => (acc_x, group[0].height),
     };
     (canvas, offsets)
@@ -259,7 +286,8 @@ pub fn plan(cfg: &Config, detected: &[Output]) -> Result<Vec<WorkerKind>> {
             let ((vw, vh), offsets) = compute_canvas(&group, cfg.span_direction);
             tracing::info!(
                 "span canvas: {vw}x{vh} ({} outputs, direction={:?})",
-                group.len(), cfg.span_direction
+                group.len(),
+                cfg.span_direction
             );
             // Each span worker gets its own mpv IPC socket so the daemon
             // can lockstep them. Only emit sockets for video — for stills
@@ -272,7 +300,9 @@ pub fn plan(cfg: &Config, detected: &[Output]) -> Result<Vec<WorkerKind>> {
             for (i, out) in group.iter().enumerate() {
                 let (x, y) = offsets[i];
                 let vf = build_span_vf(vw, vh, out.width, out.height, x, y, &cfg.span_fit);
-                let ipc_socket = sock_dir.as_ref().map(|d| d.join(format!("mpv-{}.sock", out.name)));
+                let ipc_socket = sock_dir
+                    .as_ref()
+                    .map(|d| d.join(format!("mpv-{}.sock", out.name)));
                 plan.push(WorkerKind::Mpv {
                     output: out.name.clone(),
                     path: span_path.clone(),
@@ -335,6 +365,11 @@ pub fn plan(cfg: &Config, detected: &[Output]) -> Result<Vec<WorkerKind>> {
     Ok(plan)
 }
 
+// Eight parameters trips clippy's `too_many_arguments` lint, but
+// they're already a flat reflection of WorkerKind::Mpv's fields — any
+// wrapper struct would just duplicate that. Defer the refactor; this
+// function is leaf code, not a place where ergonomic-args matter.
+#[allow(clippy::too_many_arguments)]
 fn spawn_mpv(
     output: &str,
     path: &Path,
@@ -385,8 +420,8 @@ fn spawn_mpv(
         // Solo (side video): mpv handles fit.
         match fit {
             "stretch" => opts.push("keepaspect=no".into()),
-            "fit"     => { /* default mpv letterbox */ }
-            _         => {
+            "fit" => { /* default mpv letterbox */ }
+            _ => {
                 opts.push("panscan=1.0".into());
                 opts.push("keepaspect=yes".into());
             }
@@ -405,38 +440,154 @@ fn spawn_mpv(
     opts.push("really-quiet=yes".into());
     opts.push("force-window=no".into());
 
-    for e in extra { opts.push(e.clone()); }
+    for e in extra {
+        opts.push(e.clone());
+    }
 
     let opt_str = opts.join(" ");
 
     let mut cmd = Command::new(bin);
-    cmd.arg("-o").arg(&opt_str)
-       .arg(output)
-       .arg(path)
-       .stdin(Stdio::null())
-       .stdout(Stdio::null())
-       .stderr(Stdio::inherit());
+    cmd.arg("-o")
+        .arg(&opt_str)
+        .arg(output)
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit());
 
     tracing::info!(
         "spawning mpvpaper worker: -o {:?} {} {} ({:?})",
-        opt_str, output, path.display(), media
+        opt_str,
+        output,
+        path.display(),
+        media
     );
     cmd.spawn().context("spawn mpvpaper")
 }
 
 fn spawn_swaybg(output: &str, image: &Path, mode: &str) -> Result<Child> {
-    let bin = which::which("swaybg")
-        .context("`swaybg` not found on PATH (install: pacman -S swaybg)")?;
+    let bin =
+        which::which("swaybg").context("`swaybg` not found on PATH (install: pacman -S swaybg)")?;
 
     let mut cmd = Command::new(bin);
-    cmd.arg("-o").arg(output)
-       .arg("-i").arg(image)
-       .arg("-m").arg(mode)
-       .stdin(Stdio::null())
-       .stdout(Stdio::null())
-       .stderr(Stdio::inherit());
+    cmd.arg("-o")
+        .arg(output)
+        .arg("-i")
+        .arg(image)
+        .arg("-m")
+        .arg(mode)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit());
 
-    tracing::info!("spawning swaybg worker: -o {} -i {} -m {}",
-                   output, image.display(), mode);
+    tracing::info!(
+        "spawning swaybg worker: -o {} -i {} -m {}",
+        output,
+        image.display(),
+        mode
+    );
     cmd.spawn().context("spawn swaybg")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cfg_with_side_fit(value: &str) -> Config {
+        Config {
+            side_fit: value.into(),
+            ..Config::default()
+        }
+    }
+
+    #[test]
+    fn side_swaybg_mode_translates_unified_fit_vocabulary() {
+        assert_eq!(side_swaybg_mode(&cfg_with_side_fit("crop")), "fill");
+        assert_eq!(side_swaybg_mode(&cfg_with_side_fit("fit")), "fit");
+        assert_eq!(side_swaybg_mode(&cfg_with_side_fit("stretch")), "stretch");
+        // Unknown values fall back to fill (swaybg's "scale to cover").
+        assert_eq!(side_swaybg_mode(&cfg_with_side_fit("bogus")), "fill");
+    }
+
+    #[test]
+    fn build_span_vf_crop_produces_cover_then_crop() {
+        // 1920×2160 canvas, top monitor 1920×1080 at (0,0). For "crop"
+        // we expect: scale to cover, then crop to the monitor slice.
+        let vf = build_span_vf(1920, 2160, 1920, 1080, 0, 0, "crop");
+        assert!(vf.contains("force_original_aspect_ratio=increase"), "{vf}");
+        assert!(vf.contains("crop=1920:2160"), "outer canvas crop: {vf}");
+        assert!(vf.contains("crop=1920:1080:0:0"), "monitor slice: {vf}");
+    }
+
+    #[test]
+    fn build_span_vf_fit_letterboxes() {
+        let vf = build_span_vf(1920, 2160, 1920, 1080, 0, 1080, "fit");
+        assert!(vf.contains("force_original_aspect_ratio=decrease"), "{vf}");
+        assert!(vf.contains("pad=1920:2160"), "padding: {vf}");
+        assert!(vf.contains("crop=1920:1080:0:1080"), "bottom slice: {vf}");
+    }
+
+    #[test]
+    fn build_span_vf_stretch_skips_aspect() {
+        let vf = build_span_vf(1920, 2160, 1920, 1080, 0, 0, "stretch");
+        // Plain `scale=1920:2160` with no aspect-preservation flag.
+        assert!(vf.starts_with("scale=1920:2160"), "{vf}");
+        assert!(
+            !vf.contains("aspect_ratio"),
+            "should not preserve aspect: {vf}"
+        );
+        assert!(vf.contains("crop=1920:1080:0:0"), "monitor slice: {vf}");
+    }
+
+    #[test]
+    fn compute_canvas_stacks_vertically() {
+        let a = Output {
+            name: "A".into(),
+            description: "".into(),
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+            scale: 1,
+        };
+        let b = Output {
+            name: "B".into(),
+            description: "".into(),
+            x: 0,
+            y: 1080,
+            width: 1920,
+            height: 1080,
+            scale: 1,
+        };
+        let group: Vec<&Output> = vec![&a, &b];
+        let ((vw, vh), offsets) = compute_canvas(&group, SpanDirection::Vertical);
+        assert_eq!((vw, vh), (1920, 2160));
+        assert_eq!(offsets, vec![(0, 0), (0, 1080)]);
+    }
+
+    #[test]
+    fn compute_canvas_lays_out_horizontally() {
+        let a = Output {
+            name: "A".into(),
+            description: "".into(),
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+            scale: 1,
+        };
+        let b = Output {
+            name: "B".into(),
+            description: "".into(),
+            x: 1920,
+            y: 0,
+            width: 1920,
+            height: 1080,
+            scale: 1,
+        };
+        let group: Vec<&Output> = vec![&a, &b];
+        let ((vw, vh), offsets) = compute_canvas(&group, SpanDirection::Horizontal);
+        assert_eq!((vw, vh), (3840, 1080));
+        assert_eq!(offsets, vec![(0, 0), (1920, 0)]);
+    }
 }

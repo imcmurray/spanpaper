@@ -28,8 +28,14 @@ pub fn save_preset(app: &gtk4::Application, click_x: i32, click_y: i32) {
         window.set_layer(gtk4_layer_shell::Layer::Top);
         window.set_anchor(gtk4_layer_shell::Edge::Top, true);
         window.set_anchor(gtk4_layer_shell::Edge::Left, true);
-        window.set_margin(gtk4_layer_shell::Edge::Top, click_y.max(0).saturating_add(4));
-        window.set_margin(gtk4_layer_shell::Edge::Left, click_x.max(0).saturating_add(4));
+        window.set_margin(
+            gtk4_layer_shell::Edge::Top,
+            click_y.max(0).saturating_add(4),
+        );
+        window.set_margin(
+            gtk4_layer_shell::Edge::Left,
+            click_x.max(0).saturating_add(4),
+        );
         // Need keyboard input — set to Exclusive so the GtkEntry
         // gets keystrokes regardless of compositor focus rules.
         // (OnDemand can be flaky for transient layer-shell windows
@@ -65,7 +71,7 @@ pub fn save_preset(app: &gtk4::Application, click_x: i32, click_y: i32) {
         .build();
 
     let cancel = gtk4::Button::builder().label("Cancel").build();
-    let ok     = gtk4::Button::builder()
+    let ok = gtk4::Button::builder()
         .label("Save")
         .css_classes(vec!["suggested-action"])
         .build();
