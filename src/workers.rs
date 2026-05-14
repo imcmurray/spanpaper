@@ -28,7 +28,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{
+use spanpaper::{
     config::{Config, SpanDirection},
     ipc,
     media::MediaKind,
@@ -142,8 +142,8 @@ impl Worker {
                 // It'll be out of sync with the surviving worker until
                 // the user reloads — accept that vs. a black/frozen tile.
                 if let WorkerKind::Mpv { ipc_socket: Some(sock), .. } = &self.kind {
-                    if crate::ipc::wait_for_socket(sock, Duration::from_secs(5)) {
-                        if let Err(e) = crate::ipc::unpause(sock) {
+                    if ipc::wait_for_socket(sock, Duration::from_secs(5)) {
+                        if let Err(e) = ipc::unpause(sock) {
                             tracing::warn!(
                                 "{}: post-restart unpause failed: {e:#}", self.label
                             );

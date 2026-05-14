@@ -22,43 +22,18 @@ use std::{
     time::Duration,
 };
 
-use crate::{
-    config::Config,
-    ipc,
-    outputs,
-    workers::{self, Worker},
-};
+use spanpaper::{config::Config, ipc, outputs, state};
+
+use crate::workers::{self, Worker};
 
 static STOP: AtomicBool = AtomicBool::new(false);
 static RELOAD: AtomicBool = AtomicBool::new(false);
 
-fn runtime_dir() -> Result<PathBuf> {
-    if let Ok(d) = std::env::var("XDG_RUNTIME_DIR") {
-        let p = PathBuf::from(d).join("spanpaper");
-        fs::create_dir_all(&p).ok();
-        return Ok(p);
-    }
-    let uid = nix::unistd::getuid().as_raw();
-    let p = PathBuf::from(format!("/tmp/spanpaper-{uid}"));
-    fs::create_dir_all(&p).ok();
-    Ok(p)
-}
+// runtime_dir / pid_file / current_pid moved to `spanpaper::state` so
+// the tray applet can share the same logic. The local re-exports below
+// keep this module's public surface stable for callers in cli.rs.
 
-fn pid_file() -> Result<PathBuf> {
-    Ok(runtime_dir()?.join("spanpaper.pid"))
-}
-
-/// Read the pid file and verify the process is alive.
-pub fn current_pid() -> Result<i32> {
-    let p = pid_file()?;
-    let text = fs::read_to_string(&p)
-        .with_context(|| format!("daemon not running (no pid file at {})", p.display()))?;
-    let pid: i32 = text.trim().parse().context("malformed pid file")?;
-    // Signal 0 = existence check.
-    kill(Pid::from_raw(pid), None)
-        .with_context(|| format!("daemon not running (pid {pid} dead)"))?;
-    Ok(pid)
-}
+pub use spanpaper::state::current_pid;
 
 pub fn reload() -> Result<()> {
     let pid = current_pid()?;
@@ -126,7 +101,7 @@ pub fn run(background: bool) -> Result<()> {
         anyhow::bail!("daemon already running (pid {pid}); use `spanpaper stop` first");
     }
 
-    let pid_path = pid_file()?;
+    let pid_path = state::pid_file_path()?;
     write_pid_file(&pid_path)?;
 
     install_signal_handlers()?;

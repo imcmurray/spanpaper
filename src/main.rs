@@ -2,12 +2,10 @@
 //
 // Entry point: sets up tracing, parses the CLI, dispatches to subcommands.
 
+// Server-side modules live in the bin; the rest comes from the lib
+// crate `spanpaper` (src/lib.rs).
 mod cli;
-mod config;
 mod daemon;
-mod ipc;
-mod media;
-mod outputs;
 mod workers;
 
 use anyhow::Result;

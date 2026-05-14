@@ -15,30 +15,14 @@ use crate::{
 };
 use gtk4::prelude::*;
 use gtk4_layer_shell::LayerShell;
-use serde::Deserialize;
+use spanpaper::config::{Config, SpanDirection};
 use std::path::Path;
 
-/// Subset of the daemon's config we render. Extra fields in the TOML
-/// are ignored (serde default behavior), so this stays compatible
-/// across daemon config-schema additions.
-#[derive(Debug, Default, Deserialize)]
-struct PartialConfig {
-    span: Option<String>,
-    side: Option<String>,
-    #[serde(default)]
-    span_outputs: Vec<String>,
-    side_output: Option<String>,
-    #[serde(default)]
-    span_direction: Option<String>,
-}
-
-impl PartialConfig {
-    fn load() -> Self {
-        let Some(home) = dirs::config_dir() else { return Self::default() };
-        let path = home.join("spanpaper").join("config.toml");
-        let Ok(text) = std::fs::read_to_string(&path) else { return Self::default() };
-        toml::from_str(&text).unwrap_or_default()
-    }
+/// Load the daemon's config, falling back to a default if anything
+/// goes wrong (missing file, parse error, …). The palette can render
+/// usefully even without a daemon — it shows "(unset)" placeholders.
+fn load_config() -> Config {
+    Config::load_or_default().unwrap_or_default()
 }
 
 /// Max pixel size of the longest monitor edge in the popover. The other
@@ -202,7 +186,7 @@ fn build_content() -> gtk4::Widget {
             return error_widget(&format!("Could not enumerate outputs:\n{e:#}"));
         }
     };
-    let cfg = PartialConfig::load();
+    let cfg = load_config();
 
     let root = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Vertical)
@@ -240,7 +224,7 @@ fn error_widget(msg: &str) -> gtk4::Widget {
 
 /// Build the horizontal row of monitor rectangles. Span group on the
 /// left (oriented per `span_direction`), side output on the right.
-fn build_layout_row(outputs: &[OutputInfo], cfg: &PartialConfig) -> gtk4::Box {
+fn build_layout_row(outputs: &[OutputInfo], cfg: &Config) -> gtk4::Box {
     let row = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .spacing(16)
@@ -274,10 +258,9 @@ fn build_layout_row(outputs: &[OutputInfo], cfg: &PartialConfig) -> gtk4::Box {
     // set" — a side monitor placed to the left of the span pair on
     // the user's desk renders on the left of the popover too.
     let span_box = (!span_outs.is_empty()).then(|| {
-        let dir = if cfg.span_direction.as_deref() == Some("horizontal") {
-            gtk4::Orientation::Horizontal
-        } else {
-            gtk4::Orientation::Vertical
+        let dir = match cfg.span_direction {
+            SpanDirection::Horizontal => gtk4::Orientation::Horizontal,
+            SpanDirection::Vertical   => gtk4::Orientation::Vertical,
         };
         let group = gtk4::Box::builder()
             .orientation(dir)
@@ -315,7 +298,7 @@ fn build_layout_row(outputs: &[OutputInfo], cfg: &PartialConfig) -> gtk4::Box {
 
 fn build_output_frame(
     out: &OutputInfo,
-    assigned: Option<&str>,
+    assigned: Option<&Path>,
     scale: f32,
     slot: Slot,
 ) -> gtk4::Frame {
@@ -327,7 +310,7 @@ fn build_output_frame(
     let h = ((out.height as f32) * scale).round().max(40.0) as i32;
 
     let assigned_text = match assigned {
-        Some(p) => basename(Path::new(p)),
+        Some(p) => basename(p),
         None => "(unset)".into(),
     };
     let frame = gtk4::Frame::builder()
@@ -425,7 +408,7 @@ fn build_output_frame(
             .build();
         thumb_area.append(&spinner);
 
-        let path = std::path::PathBuf::from(p);
+        let path = p.to_path_buf();
         let thumb_area_w = thumb_area.downgrade();
         let fallback_text = res_text.clone();
         gtk4::glib::spawn_future_local(async move {
@@ -475,7 +458,7 @@ fn build_output_frame(
     frame
 }
 
-fn summary_row(role: &str, slot: Slot, path: Option<&str>) -> gtk4::Box {
+fn summary_row(role: &str, slot: Slot, path: Option<&Path>) -> gtk4::Box {
     let row = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .spacing(8)
@@ -487,8 +470,12 @@ fn summary_row(role: &str, slot: Slot, path: Option<&str>) -> gtk4::Box {
         .build();
     row.append(&role_label);
 
+    let path_text: std::borrow::Cow<'_, str> = match path {
+        Some(p) => p.to_string_lossy(),
+        None => std::borrow::Cow::Borrowed("(unset)"),
+    };
     let path_label = gtk4::Label::builder()
-        .label(path.unwrap_or("(unset)"))
+        .label(path_text.as_ref())
         .ellipsize(gtk4::pango::EllipsizeMode::Middle)
         .hexpand(true)
         .xalign(0.0)

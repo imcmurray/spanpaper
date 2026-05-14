@@ -1,6 +1,7 @@
 // CLI surface: clap definitions and subcommand dispatch.
 
-use crate::{config::Config, daemon, outputs};
+use spanpaper::{config::Config, outputs};
+use crate::daemon;
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;

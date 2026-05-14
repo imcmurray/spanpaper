@@ -73,3 +73,23 @@ pub fn send_command(socket: &Path, json: &str) -> Result<()> {
 pub fn unpause(socket: &Path) -> Result<()> {
     send_command(socket, r#"{"command":["set_property","pause",false]}"#)
 }
+
+pub fn pause(socket: &Path) -> Result<()> {
+    send_command(socket, r#"{"command":["set_property","pause",true]}"#)
+}
+
+/// Enumerate every `mpv-*.sock` currently living in the spanpaper
+/// runtime dir. Used by the tray to broadcast pause/resume across
+/// the span pair + side video without knowing their exact names.
+pub fn enumerate_sockets() -> Vec<PathBuf> {
+    let Ok(dir) = socket_dir() else { return vec![] };
+    let Ok(rd) = fs::read_dir(&dir) else { return vec![] };
+    rd.filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.starts_with("mpv-") && n.ends_with(".sock"))
+                .unwrap_or(false)
+        })
+        .collect()
+}
