@@ -46,7 +46,7 @@ pub fn detect() -> Result<Vec<Output>> {
     queue.roundtrip(&mut state).context("wayland roundtrip 2")?;
 
     let mut out: Vec<Output> = state.outputs.into_values().collect();
-    out.sort_by(|a, b| (a.y, a.x, a.name.clone()).cmp(&(b.y, b.x, b.name.clone())));
+    out.sort_by_key(|o| (o.y, o.x, o.name.clone()));
     Ok(out)
 }
 
@@ -147,23 +147,19 @@ impl Dispatch<wl_output::WlOutput, ()> for State {
                 width,
                 height,
                 ..
-            } => {
-                if flags
-                    .into_result()
-                    .map(|f| f.contains(wl_output::Mode::Current))
-                    .unwrap_or(false)
-                {
-                    entry.width = width;
-                    entry.height = height;
-                }
+            } if flags
+                .into_result()
+                .map(|f| f.contains(wl_output::Mode::Current))
+                .unwrap_or(false) =>
+            {
+                entry.width = width;
+                entry.height = height;
             }
             wl_output::Event::Scale { factor } => entry.scale = factor,
-            wl_output::Event::Name { name } => {
-                // wl_output v4 also carries the connector name. Prefer xdg_output's
-                // name if both arrive (they should match), but populate as fallback.
-                if entry.name.is_none() {
-                    entry.name = Some(name);
-                }
+            // wl_output v4 also carries the connector name. Prefer xdg_output's
+            // name if both arrive (they should match), but populate as fallback.
+            wl_output::Event::Name { name } if entry.name.is_none() => {
+                entry.name = Some(name);
             }
             wl_output::Event::Description { description } => {
                 entry.description = Some(description);
