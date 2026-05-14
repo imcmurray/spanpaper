@@ -30,14 +30,14 @@ clone, no Rust toolchain, no compile:
 
 ```bash
 # Substitute the latest version — check the Releases page.
-VERSION=0.3.1
+VERSION=0.4.0
 PKGREL=1
 curl -LO "https://github.com/imcmurray/spanpaper/releases/download/v$VERSION/spanpaper-bin-$VERSION-$PKGREL-x86_64.pkg.tar.zst"
 sudo pacman -U "spanpaper-bin-$VERSION-$PKGREL-x86_64.pkg.tar.zst"
-spanpaper install --start
+spanpaper enable --start
 ```
 
-Three commands; the third (`spanpaper install --start`) wires
+Three commands; the third (`spanpaper enable --start`) wires
 user-level autostart entries to `~/.config/autostart/spanpaper.desktop`
 and `~/.config/autostart/spanpaper-tray.desktop`, then launches both
 right away so you don't need to log out and back in. Re-running it is
@@ -55,7 +55,7 @@ Pacman pulls every runtime dep (`mpvpaper`, `swaybg`, `gtk4`,
 Plus a (not-enabled) systemd `--user` unit at
 `/usr/lib/systemd/user/spanpaper.service` and sample XDG autostart
 entries at `/usr/share/spanpaper/autostart/spanpaper{,-tray}.desktop`
-that `spanpaper install` reads from (and that you can copy into
+that `spanpaper enable` reads from (and that you can copy into
 `~/.config/autostart/` by hand if you prefer).
 Uninstall is `sudo pacman -R spanpaper-bin`.
 
@@ -239,9 +239,9 @@ The one-command path (works for both daemon and tray, source or
 pacman install):
 
 ```bash
-spanpaper install --start                  # XDG autostart, launches now
-spanpaper install --method=systemd --start # systemd --user unit, launches now
-spanpaper install --method=both --start    # both, for portability across machines
+spanpaper enable --start                  # XDG autostart, launches now
+spanpaper enable --method=systemd --start # systemd --user unit, launches now
+spanpaper enable --method=both --start    # both, for portability across machines
 ```
 
 That writes `~/.config/autostart/spanpaper.desktop` (and
@@ -250,7 +250,7 @@ optionally `~/.config/systemd/user/spanpaper.service`. Re-runs are
 idempotent — the autostart entries get rewritten, already-running
 daemon and tray are left alone.
 
-`spanpaper install --start` figures out paths from `current_exe()`,
+`spanpaper enable --start` figures out paths from `current_exe()`,
 so it works equally well after `pacman -U …spanpaper-bin.pkg.tar.zst`
 (binaries at `/usr/bin`) and after `setup.sh` (binaries at
 `~/.local/bin`).
@@ -277,7 +277,7 @@ applet.
 
 ### Manual / scripted alternatives
 
-If you'd rather not call `spanpaper install`, `setup.sh` accepts
+If you'd rather not call `spanpaper enable`, `setup.sh` accepts
 `--autostart=xdg`, `--autostart=systemd`, or `--autostart=none`. Or
 do it by hand:
 
@@ -371,10 +371,21 @@ spanpaper-tray                 # foreground (panel icon + layout palette)
 spanpaper-tray &               # background — usual launch pattern
 
 # Autostart wiring (writes ~/.config/autostart/spanpaper{,-tray}.desktop)
-spanpaper install                           # XDG autostart for daemon + tray
-spanpaper install --start                   # …also launch daemon + tray now
-spanpaper install --method=systemd          # systemd --user unit instead of XDG for the daemon
-spanpaper install --method=both             # both XDG and systemd (tray is always XDG)
+spanpaper enable                           # XDG autostart for daemon + tray
+spanpaper enable --start                   # …also launch daemon + tray now
+spanpaper enable --method=systemd          # systemd --user unit instead of XDG for the daemon
+spanpaper enable --method=both             # both XDG and systemd (tray is always XDG)
+# (`spanpaper install` is a kept-around alias for `enable` if you've
+#  scripted against the older name.)
+
+# Presets — named snapshots of span/side/fits/audio.
+spanpaper preset save NAME                 # snapshot the active config
+spanpaper preset list                      # "*" marks the active preset
+spanpaper preset load NAME                 # apply + SIGHUP daemon
+spanpaper preset next                      # cycle forward (insertion order, wraps)
+spanpaper preset prev                      # cycle backward
+spanpaper preset rename OLD NEW
+spanpaper preset delete NAME
 ```
 
 `--method=xdg` (default) writes

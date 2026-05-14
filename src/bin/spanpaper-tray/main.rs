@@ -117,6 +117,14 @@ impl Tray for SpanpaperTray {
         // poorly — the result was Budgie cached the cold-start menu
         // and silently swallowed clicks on items it thought were
         // disabled. Show only what's actionable, hide everything else.
+        //
+        // FIXME(upstream): Budgie's `budgie-statusnotifier` applet
+        // should refresh on `ItemsPropertiesUpdated` like KDE's tray
+        // does. When/if that lands, this shrink/grow dance can become
+        // a plain "always emit, toggle `enabled`" — clearer to read
+        // and removes a real-but-hidden coupling to a Budgie quirk.
+        // No upstream issue filed yet; if anyone files one, link the
+        // URL here.
         let running = self.daemon_running;
         let paused = self.paused;
         let tx = self.ui_tx.clone();

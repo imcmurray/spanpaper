@@ -35,7 +35,8 @@ pub enum Cmd {
     /// Wire user-level autostart: writes ~/.config/autostart/spanpaper.desktop
     /// (always) and ~/.config/autostart/spanpaper-tray.desktop (when the tray
     /// binary lives alongside the daemon). Idempotent.
-    Install(InstallArgs),
+    #[command(alias = "install")]
+    Enable(InstallArgs),
     /// Manage saved presets — named snapshots of span / side / fits /
     /// audio you can switch between or cycle through.
     #[command(subcommand)]
@@ -154,7 +155,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         }
         Cmd::Status => cmd_status(),
         Cmd::Outputs => cmd_outputs(),
-        Cmd::Install(a) => cmd_install(a),
+        Cmd::Enable(a) => cmd_install(a),
         Cmd::Preset(sub) => cmd_preset(sub),
     }
 }

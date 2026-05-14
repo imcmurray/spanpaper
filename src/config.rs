@@ -144,6 +144,7 @@ impl Config {
         let text = fs::read_to_string(&p).with_context(|| format!("read {}", p.display()))?;
         let cfg: Config =
             toml::from_str(&text).with_context(|| format!("parse {}", p.display()))?;
+        warn_about_deprecated_fields(&text, &p);
         Ok(cfg)
     }
 
@@ -244,6 +245,37 @@ pub fn validate_preset_name(name: &str) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// toml's serde silently ignores unknown fields, which is friendly but
+/// hides the fact that we're parsing-and-dropping fields the user
+/// thinks are configuring something. This walks the raw TOML text
+/// once and warns when a known-deprecated key appears, telling the
+/// user it's been replaced (and that the next `spanpaper set` will
+/// drop the line entirely since the serialised Config no longer has
+/// the field).
+fn warn_about_deprecated_fields(raw: &str, path: &Path) {
+    // (deprecated-key-name, replacement-or-note)
+    const DEPRECATED: &[(&str, &str)] = &[(
+        "side_mode",
+        "replaced by `side_fit` in v0.3.1; current value is ignored",
+    )];
+    for line in raw.lines() {
+        let trimmed = line.trim_start();
+        for (key, note) in DEPRECATED {
+            // Crude prefix match — sufficient for top-level keys we
+            // know about. (TOML nesting can't put these inside a
+            // section without changing the key name, so a top-level
+            // bare-key match is fine.)
+            if trimmed.starts_with(&format!("{key} ")) || trimmed.starts_with(&format!("{key}=")) {
+                tracing::warn!(
+                    "config field `{key}` is deprecated ({note}); remove it from {} \
+                     (next `spanpaper set` will rewrite the file without it)",
+                    path.display()
+                );
+            }
+        }
+    }
 }
 
 fn ensure_file(p: &Path, label: &str) -> Result<()> {
