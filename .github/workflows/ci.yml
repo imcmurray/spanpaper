@@ -48,17 +48,56 @@ jobs:
   build-tray:
     name: build with --features tray
     runs-on: ubuntu-latest
+    env:
+      # Pin to a tested release; bump deliberately when the upstream
+      # changelog lists something interesting. wmww/gtk4-layer-shell
+      # tags every release here:
+      # https://github.com/wmww/gtk4-layer-shell/releases
+      GTK4_LAYER_SHELL_VERSION: "1.3.0"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: install GTK4 + layer-shell headers
+      - name: install GTK4 + build deps
         run: |
           sudo apt-get update
+          # gtk4-layer-shell isn't packaged on ubuntu-latest (24.04 LTS);
+          # it landed in Ubuntu 25.10. We build it from source below.
+          # libgtk-4-dev / libwayland-dev / wayland-protocols are its
+          # build-time deps; meson + ninja drive the build.
           sudo apt-get install -y --no-install-recommends \
             libgtk-4-dev \
-            libgtk4-layer-shell-dev \
+            libwayland-dev \
+            libwayland-bin \
+            wayland-protocols \
             libdbus-1-dev \
-            pkg-config
+            pkg-config \
+            meson \
+            ninja-build \
+            gobject-introspection \
+            libgirepository1.0-dev \
+            valac
+      - name: cache gtk4-layer-shell build
+        id: cache-gtk4ls
+        uses: actions/cache@v4
+        with:
+          path: /opt/gtk4-layer-shell
+          key: gtk4-layer-shell-${{ env.GTK4_LAYER_SHELL_VERSION }}-noble-v1
+      - name: build gtk4-layer-shell from source
+        if: steps.cache-gtk4ls.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "v${GTK4_LAYER_SHELL_VERSION}" \
+            https://github.com/wmww/gtk4-layer-shell /tmp/gtk4ls
+          cd /tmp/gtk4ls
+          meson setup build \
+            --prefix=/opt/gtk4-layer-shell \
+            -Dexamples=false \
+            -Ddocs=false \
+            -Dtests=false
+          ninja -C build install
+      - name: expose gtk4-layer-shell to pkg-config + linker
+        run: |
+          echo "PKG_CONFIG_PATH=/opt/gtk4-layer-shell/lib/x86_64-linux-gnu/pkgconfig:/opt/gtk4-layer-shell/lib/pkgconfig" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=/opt/gtk4-layer-shell/lib/x86_64-linux-gnu:/opt/gtk4-layer-shell/lib" >> $GITHUB_ENV
       - name: cache cargo
         uses: actions/cache@v4
         with:
