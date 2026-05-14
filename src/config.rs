@@ -56,6 +56,40 @@ pub struct Config {
     /// panscan/keepaspect, same translation as for span).
     #[serde(default = "default_side_fit")]
     pub side_fit: String,
+
+    /// Saved presets, ordered by insertion (newest at the end). Cycle
+    /// order = this Vec's order. Default empty.
+    #[serde(default)]
+    pub presets: Vec<Preset>,
+
+    /// Name of the preset whose values currently match the active
+    /// config. Set by `spanpaper preset load NAME` / `save NAME`,
+    /// cleared (strict mode) by any `spanpaper set --…` that mutates
+    /// preset-relevant fields. `None` is normal — it just means the
+    /// active config doesn't correspond to any saved preset.
+    #[serde(default)]
+    pub active_preset: Option<String>,
+}
+
+/// A named snapshot of preset-relevant Config fields. Hardware
+/// identity (`span_outputs`, `side_output`) is deliberately NOT
+/// included — a preset recorded on Rig A shouldn't dictate output
+/// names on Rig B.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Preset {
+    pub name: String,
+    #[serde(default)]
+    pub span: Option<PathBuf>,
+    #[serde(default)]
+    pub side: Option<PathBuf>,
+    #[serde(default)]
+    pub audio: bool,
+    #[serde(default = "default_span_fit")]
+    pub span_fit: String,
+    #[serde(default = "default_side_fit")]
+    pub side_fit: String,
+    #[serde(default = "default_span_direction")]
+    pub span_direction: SpanDirection,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -85,6 +119,8 @@ impl Default for Config {
             extra_mpv_options: vec![],
             span_fit: default_span_fit(),
             side_fit: default_side_fit(),
+            presets: vec![],
+            active_preset: None,
         }
     }
 }
@@ -147,6 +183,61 @@ impl Config {
         }
         Ok(())
     }
+
+    /// Snapshot the active preset-relevant fields into a `Preset`.
+    /// Doesn't touch the config; callers wire the result into
+    /// `self.presets` themselves.
+    pub fn snapshot_as_preset(&self, name: String) -> Preset {
+        Preset {
+            name,
+            span: self.span.clone(),
+            side: self.side.clone(),
+            audio: self.audio,
+            span_fit: self.span_fit.clone(),
+            side_fit: self.side_fit.clone(),
+            span_direction: self.span_direction,
+        }
+    }
+
+    /// Copy a preset's fields onto the active config and mark it as
+    /// active. Returns Err if no preset with the given name exists.
+    pub fn apply_preset(&mut self, name: &str) -> Result<()> {
+        let preset = self.presets.iter().find(|p| p.name == name).cloned()
+            .with_context(|| format!("no preset named {name:?}"))?;
+        self.span = preset.span;
+        self.side = preset.side;
+        self.audio = preset.audio;
+        self.span_fit = preset.span_fit;
+        self.side_fit = preset.side_fit;
+        self.span_direction = preset.span_direction;
+        self.active_preset = Some(preset.name);
+        Ok(())
+    }
+
+    /// Find the index of the named preset in the cycle order
+    /// (`presets` Vec is the source of truth for next/prev).
+    pub fn preset_index(&self, name: &str) -> Option<usize> {
+        self.presets.iter().position(|p| p.name == name)
+    }
+}
+
+/// Sanity-check a preset name. Names appear in CLI args, in the tray
+/// menu, and in the TOML config — they must be safe in all three.
+pub fn validate_preset_name(name: &str) -> Result<()> {
+    if name.is_empty() {
+        anyhow::bail!("preset name is empty");
+    }
+    if name.starts_with('.') {
+        anyhow::bail!("preset name must not start with '.': {name:?}");
+    }
+    for c in name.chars() {
+        if c.is_control() || c == '/' || c == '\\' || c == '\n' {
+            anyhow::bail!(
+                "preset name contains forbidden character {c:?} in {name:?}"
+            );
+        }
+    }
+    Ok(())
 }
 
 fn ensure_file(p: &Path, label: &str) -> Result<()> {

@@ -36,6 +36,32 @@ pub enum Cmd {
     /// (always) and ~/.config/autostart/spanpaper-tray.desktop (when the tray
     /// binary lives alongside the daemon). Idempotent.
     Install(InstallArgs),
+    /// Manage saved presets — named snapshots of span / side / fits /
+    /// audio you can switch between or cycle through.
+    #[command(subcommand)]
+    Preset(PresetCmd),
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PresetCmd {
+    /// Snapshot the active config into a named preset (overwrites if
+    /// it already exists). Sets `active_preset = NAME`.
+    Save { name: String },
+    /// Print all saved preset names; the active one is marked with "*".
+    List,
+    /// Copy a preset's fields into the active config and SIGHUP daemon.
+    /// Sets `active_preset = NAME`.
+    Load { name: String },
+    /// Remove a preset from the list. Clears `active_preset` if it matched.
+    Delete { name: String },
+    /// Rename a preset in place. Updates `active_preset` if it matched.
+    Rename { old: String, new: String },
+    /// Advance to the next preset in insertion order; wraps from the
+    /// last back to the first. If nothing is currently active (or the
+    /// active preset no longer exists), loads index 0.
+    Next,
+    /// Like `next` but in reverse.
+    Prev,
 }
 
 #[derive(Args, Debug)]
@@ -129,6 +155,107 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         Cmd::Status => cmd_status(),
         Cmd::Outputs => cmd_outputs(),
         Cmd::Install(a) => cmd_install(a),
+        Cmd::Preset(sub) => cmd_preset(sub),
+    }
+}
+
+fn cmd_preset(sub: PresetCmd) -> Result<()> {
+    use spanpaper::config::validate_preset_name;
+
+    let mut cfg = Config::load_or_default().context("loading config")?;
+
+    match sub {
+        PresetCmd::Save { name } => {
+            validate_preset_name(&name)?;
+            let preset = cfg.snapshot_as_preset(name.clone());
+            // Overwrite if present, otherwise append (insertion order).
+            match cfg.presets.iter().position(|p| p.name == name) {
+                Some(i) => cfg.presets[i] = preset,
+                None    => cfg.presets.push(preset),
+            }
+            cfg.active_preset = Some(name.clone());
+            cfg.save().context("save config")?;
+            tracing::info!("saved preset {name:?}");
+        }
+        PresetCmd::List => {
+            if cfg.presets.is_empty() {
+                println!("(no presets saved)");
+            } else {
+                for p in &cfg.presets {
+                    let marker = if cfg.active_preset.as_deref() == Some(p.name.as_str()) {
+                        "*"
+                    } else {
+                        " "
+                    };
+                    println!("{marker} {}", p.name);
+                }
+            }
+        }
+        PresetCmd::Load { name } => {
+            cfg.apply_preset(&name).context("load preset")?;
+            cfg.save().context("save config")?;
+            tracing::info!("loaded preset {name:?}");
+            sighup_running_daemon();
+        }
+        PresetCmd::Delete { name } => {
+            let before = cfg.presets.len();
+            cfg.presets.retain(|p| p.name != name);
+            if cfg.presets.len() == before {
+                anyhow::bail!("no preset named {name:?}");
+            }
+            if cfg.active_preset.as_deref() == Some(name.as_str()) {
+                cfg.active_preset = None;
+            }
+            cfg.save().context("save config")?;
+            tracing::info!("deleted preset {name:?}");
+        }
+        PresetCmd::Rename { old, new } => {
+            validate_preset_name(&new)?;
+            let i = cfg.presets.iter().position(|p| p.name == old)
+                .with_context(|| format!("no preset named {old:?}"))?;
+            if cfg.presets.iter().any(|p| p.name == new) && new != old {
+                anyhow::bail!("preset {new:?} already exists");
+            }
+            cfg.presets[i].name = new.clone();
+            if cfg.active_preset.as_deref() == Some(old.as_str()) {
+                cfg.active_preset = Some(new.clone());
+            }
+            cfg.save().context("save config")?;
+            tracing::info!("renamed preset {old:?} -> {new:?}");
+        }
+        PresetCmd::Next => cycle_preset(&mut cfg, 1)?,
+        PresetCmd::Prev => cycle_preset(&mut cfg, -1)?,
+    }
+    Ok(())
+}
+
+fn cycle_preset(cfg: &mut Config, delta: isize) -> Result<()> {
+    if cfg.presets.is_empty() {
+        anyhow::bail!("no presets saved — use `spanpaper preset save NAME` first");
+    }
+    let len = cfg.presets.len() as isize;
+    let next_idx = match cfg.active_preset.as_deref().and_then(|n| cfg.preset_index(n)) {
+        Some(i) => ((i as isize + delta).rem_euclid(len)) as usize,
+        // Nothing active (or stale name) — start cycle at index 0,
+        // independent of direction. Predictable: cycle from a clean
+        // state always begins at the first preset.
+        None => 0,
+    };
+    let name = cfg.presets[next_idx].name.clone();
+    cfg.apply_preset(&name).expect("apply just-indexed preset");
+    cfg.save().context("save config")?;
+    tracing::info!("cycled to preset {name:?} (index {next_idx})");
+    sighup_running_daemon();
+    Ok(())
+}
+
+fn sighup_running_daemon() {
+    match daemon::reload() {
+        Ok(()) => tracing::info!("running daemon reloaded"),
+        Err(e) if e.to_string().contains("not running") => {
+            tracing::info!("daemon not running (use `spanpaper start` to launch)")
+        }
+        Err(e) => tracing::warn!("reload failed: {e:#}"),
     }
 }
 
@@ -339,19 +466,33 @@ fn run_systemctl(args: &[&str]) -> Result<()> {
 
 fn cmd_set(a: SetArgs) -> Result<()> {
     let mut cfg = Config::load_or_default().context("loading config")?;
+    // Track whether anything preset-relevant changed; if so, the
+    // active config no longer matches whatever preset was loaded, so
+    // we clear `active_preset` (strict mode — see docs/v0.4-plan.md).
+    let mut preset_relevant_changed = false;
 
     if let Some(v) = a.span {
         cfg.span = Some(validated_media_path(&v, "--span")?);
+        preset_relevant_changed = true;
     }
     if let Some(i) = a.side {
         cfg.side = Some(validated_media_path(&i, "--side")?);
+        preset_relevant_changed = true;
     }
-    if a.audio   { cfg.audio = true;  }
-    if a.no_audio{ cfg.audio = false; }
+    if a.audio   { cfg.audio = true;  preset_relevant_changed = true; }
+    if a.no_audio{ cfg.audio = false; preset_relevant_changed = true; }
     if let Some(s) = a.span_outputs { cfg.span_outputs = s; }
     if let Some(o) = a.side_output  { cfg.side_output = Some(o); }
-    if let Some(f) = a.span_fit     { cfg.span_fit = f; }
-    if let Some(f) = a.side_fit     { cfg.side_fit = f; }
+    if let Some(f) = a.span_fit     { cfg.span_fit = f; preset_relevant_changed = true; }
+    if let Some(f) = a.side_fit     { cfg.side_fit = f; preset_relevant_changed = true; }
+
+    if preset_relevant_changed {
+        if let Some(name) = cfg.active_preset.take() {
+            tracing::info!(
+                "active config diverged from preset {name:?} — clearing active_preset"
+            );
+        }
+    }
 
     cfg.save().context("saving config")?;
     tracing::info!("config saved to {}", Config::path()?.display());

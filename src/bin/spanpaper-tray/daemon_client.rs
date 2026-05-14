@@ -150,6 +150,35 @@ fn spanpaper_set(args: &[&str]) -> std::io::Result<()> {
     }
 }
 
+// ---- preset shellouts -------------------------------------------------------
+
+pub fn preset_save(name: &str) -> std::io::Result<()> {
+    preset_subcmd(&["save", name])
+}
+pub fn preset_load(name: &str) -> std::io::Result<()> {
+    preset_subcmd(&["load", name])
+}
+pub fn preset_next() -> std::io::Result<()> {
+    preset_subcmd(&["next"])
+}
+pub fn preset_prev() -> std::io::Result<()> {
+    preset_subcmd(&["prev"])
+}
+
+fn preset_subcmd(args: &[&str]) -> std::io::Result<()> {
+    let status = Command::new("spanpaper")
+        .arg("preset")
+        .args(args)
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(std::io::Error::other(format!(
+            "spanpaper preset {args:?} exited {status}"
+        )))
+    }
+}
+
 // ---- "Open config folder" via FileManager1 D-Bus ---------------------------
 
 /// Tries `org.freedesktop.FileManager1.ShowFolders` first (Nautilus /

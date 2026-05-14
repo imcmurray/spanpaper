@@ -17,6 +17,7 @@
 //! pid-file probe; layout queries go through `spanpaper outputs`.
 
 mod daemon_client;
+mod dialog;
 mod outputs_query;
 mod palette;
 mod thumbnail;
@@ -39,6 +40,9 @@ enum UiMsg {
     /// hint" — happens for menu-item activations and on panels that
     /// don't pass coords through to SNI.
     ShowPalette { x: i32, y: i32 },
+    /// Open the "Save current as…" preset-name prompt. Same (x, y)
+    /// convention as ShowPalette.
+    SavePresetDialog { x: i32, y: i32 },
 }
 
 #[derive(Debug)]
@@ -115,6 +119,7 @@ impl Tray for SpanpaperTray {
         let mut items: Vec<MenuItem<Self>> = Vec::new();
 
         if running {
+            let tx_palette = tx.clone();
             items.push(
                 StandardItem {
                     label: "Open palette".into(),
@@ -123,7 +128,7 @@ impl Tray for SpanpaperTray {
                         // No click coords for menu-item activation —
                         // let palette::show fall back to compositor
                         // default placement.
-                        let _ = tx.try_send(UiMsg::ShowPalette { x: -1, y: -1 });
+                        let _ = tx_palette.try_send(UiMsg::ShowPalette { x: -1, y: -1 });
                     }),
                     ..Default::default()
                 }
@@ -199,6 +204,10 @@ impl Tray for SpanpaperTray {
                 }
                 .into(),
             );
+
+            // Presets submenu. Read fresh from config on every render so
+            // CLI-side preset edits show up without restarting the tray.
+            items.push(build_presets_submenu(&tx));
 
             items.push(MenuItem::Separator);
         }
@@ -321,6 +330,95 @@ fn audio_item(label: &str, on: bool) -> MenuItem<SpanpaperTray> {
     .into()
 }
 
+fn build_presets_submenu(
+    tx: &async_channel::Sender<UiMsg>,
+) -> MenuItem<SpanpaperTray> {
+    // Snapshot config; render fails closed (empty preset list) if
+    // anything goes wrong.
+    let cfg = spanpaper::config::Config::load_or_default()
+        .unwrap_or_default();
+    let active = cfg.active_preset.clone();
+
+    let mut submenu: Vec<MenuItem<SpanpaperTray>> = Vec::new();
+
+    for preset in &cfg.presets {
+        // Prefix "✓ " on the active preset's label. We tried
+        // ksni's CheckmarkItem but it implies a toggle widget and
+        // some panels render it ambiguously; a label prefix is
+        // unambiguous and theme-agnostic.
+        let label = if active.as_deref() == Some(preset.name.as_str()) {
+            format!("✓ {}", preset.name)
+        } else {
+            format!("   {}", preset.name)
+        };
+        let name = preset.name.clone();
+        submenu.push(
+            StandardItem {
+                label,
+                activate: Box::new(move |_| {
+                    if let Err(e) = daemon_client::preset_load(&name) {
+                        tracing::warn!("preset load {name:?}: {e:#}");
+                    }
+                }),
+                ..Default::default()
+            }
+            .into(),
+        );
+    }
+
+    if !cfg.presets.is_empty() {
+        submenu.push(MenuItem::Separator);
+        submenu.push(
+            StandardItem {
+                label: "Next preset".into(),
+                activate: Box::new(|_| {
+                    if let Err(e) = daemon_client::preset_next() {
+                        tracing::warn!("preset next: {e:#}");
+                    }
+                }),
+                ..Default::default()
+            }
+            .into(),
+        );
+        submenu.push(
+            StandardItem {
+                label: "Previous preset".into(),
+                activate: Box::new(|_| {
+                    if let Err(e) = daemon_client::preset_prev() {
+                        tracing::warn!("preset prev: {e:#}");
+                    }
+                }),
+                ..Default::default()
+            }
+            .into(),
+        );
+        submenu.push(MenuItem::Separator);
+    }
+
+    // Always reachable: save the active config as a new preset.
+    let tx = tx.clone();
+    submenu.push(
+        StandardItem {
+            label: "Save current as…".into(),
+            activate: Box::new(move |_| {
+                // Menu activations don't carry click coords through
+                // ksni, so we let the dialog fall back to compositor
+                // placement. (-1, -1) is the sentinel for "no anchor".
+                let _ = tx.try_send(UiMsg::SavePresetDialog { x: -1, y: -1 });
+            }),
+            ..Default::default()
+        }
+        .into(),
+    );
+
+    SubMenu {
+        label: "Presets".into(),
+        submenu,
+        ..Default::default()
+    }
+    .into()
+}
+
 fn main() -> Result<()> {
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info,spanpaper_tray=debug"));
@@ -378,6 +476,7 @@ fn main() -> Result<()> {
                 let Some(app) = app_w.upgrade() else { break };
                 match msg {
                     UiMsg::ShowPalette { x, y } => palette::show(&app, x, y),
+                    UiMsg::SavePresetDialog { x, y } => dialog::save_preset(&app, x, y),
                 }
             }
             tracing::debug!("ui receiver loop ended");
@@ -422,11 +521,21 @@ async fn run_tray_service(ui_tx: async_channel::Sender<UiMsg>) -> Result<()> {
         tokio::select! {
             _ = interval.tick() => {
                 let now_state = daemon_client::daemon_alive();
-                if now_state != last_state {
+                let state_changed = now_state != last_state;
+                if state_changed {
                     tracing::debug!(
                         "daemon state changed: {last_state} → {now_state}"
                     );
-                    handle.update(|t: &mut SpanpaperTray| {
+                    last_state = now_state;
+                }
+                // Always call update() — ksni re-runs `menu()` inside,
+                // and the Presets submenu reads the config file fresh
+                // each render so CLI-side preset edits (save/delete/
+                // rename) show up within one poll cycle. update_menu's
+                // diff is cheap when nothing actually changed, and only
+                // emits LayoutUpdated when the children diverge.
+                handle.update(|t: &mut SpanpaperTray| {
+                    if state_changed {
                         t.daemon_running = now_state;
                         // A fresh daemon always boots unpaused (workers
                         // spawn with pause=yes and the supervisor sync-
@@ -435,9 +544,8 @@ async fn run_tray_service(ui_tx: async_channel::Sender<UiMsg>) -> Result<()> {
                         if !now_state {
                             t.paused = false;
                         }
-                    }).await;
-                    last_state = now_state;
-                }
+                    }
+                }).await;
             }
             _ = &mut ctrl_c => {
                 tracing::info!("ctrl-c received; tray exiting");
